@@ -20,26 +20,34 @@ begin
 	using DataStructures
 end
 
-# ╔═╡ 040b6adb-21a1-4657-b15c-660e0130ec1c
-begin
-	using Plots, GraphRecipes, PlotlyJS
-	plotlyjs()
-end
-
 # ╔═╡ da542061-f041-49ce-8011-805e5bf5ae57
 using LinearAlgebra
 
 # ╔═╡ e9ba3993-aa02-4c33-98b9-3cbe4623ad28
 using Graphs
 
+# ╔═╡ 040b6adb-21a1-4657-b15c-660e0130ec1c
+begin
+	using Plots, GraphRecipes, PlotlyJS
+	plotlyjs()
+end
+
 # ╔═╡ 3c99d56f-6eee-460c-acae-528e7fa72b62
 using PlutoUI
+
+# ╔═╡ da3f8c95-d1ab-4763-a247-1e4ad41971dc
+function flatmap(f, col)
+	return Iterators.flatmap(f, col) |> collect
+end
 
 # ╔═╡ b27f2982-568f-4ccf-8678-da0a9a5545c2
 Vertex = Int64
 
 # ╔═╡ 4646aec5-4b8d-440f-aca0-50aaac01d966
+# A tropical curve is represented by a finite graph with possible loops and parallel
+# edges. The edges are all considered to be of length 1
 mutable struct TropicalCurve
+	# The adjacency matrix stores the number of edges between two vertices (counted twice for self-edges)
 	adj_matrix::SparseMatrixCSC{Int64, Vertex}
 	function TropicalCurve(n::Int64)
 		if n < 1
@@ -57,6 +65,9 @@ Divisor = AbstractVector{Int64}
 
 # ╔═╡ ce56d3ea-55fd-4f43-b4f7-37285069a7bc
 LevelMap = AbstractVector{Int64}
+
+# ╔═╡ 48c2b423-e2d0-42a5-b608-d6aaf7c774ea
+Subgraph = BitVector
 
 # ╔═╡ 8e9b8b9c-fb40-4a5c-bddb-b801ff8078d2
 function n_vertices(G::TropicalCurve)
@@ -88,6 +99,8 @@ end
 
 # ╔═╡ 10e8fdd1-5f33-4e3e-b448-acd3f0c5950d
 function firing_matrix(adj_matrix::AbstractMatrix{Int64})
+	# The firing matrix is the matrix F such that
+	# F*[f] = [div(f)]
 	valences = sum(adj_matrix, dims=1)
 	return adj_matrix - spdiagm(0 => vec(valences))
 end
@@ -98,7 +111,9 @@ function firing_matrix(G::TropicalCurve)
 end
 
 # ╔═╡ ed442fb5-16fc-4827-81b5-b13f8e64230b
-function vertex_dists(G::TropicalCurve, v::Vertex)
+function vertex_dists(G::TropicalCurve, v::Vertex)::Vector{Int64}
+	# Returns a vector containing the distances of each vertex from the given
+	# vertex v.
 	n = size(G.adj_matrix, 1)
 	
 	# find vertex distance from base using BFS
@@ -119,15 +134,42 @@ function vertex_dists(G::TropicalCurve, v::Vertex)
 	return dist
 end
 
-# ╔═╡ 4ff161cb-db71-443b-8816-beefa44d5a1b
-function reduce(G::TropicalCurve, D::Divisor, v::Vertex)
-	n = size(G.adj_matrix, 1)
+# ╔═╡ 3cff152b-3946-4eac-a231-7e795884718c
+function dhar_algo(G::TropicalCurve, D::Divisor, v::Vertex)::Subgraph
+	# Performs Dhar's Burning Algorithm to find a minimal subgraph whose complement can fire
+	n = n_vertices(G)
 	
+	q = Queue{Vertex}()
+	enqueue!(q, v)
+	burned = fill(false, n)
+	burned[v] = true
+	Dcopy = copy(D)
+	while length(q) > 0
+		u = dequeue!(q)
+		(neighbors, val) = findnz(G.adj_matrix[:, u])
+		for nbh in neighbors[val .> 0]
+			if !burned[nbh]
+				Dcopy[nbh] -= G.adj_matrix[u, nbh]
+				if Dcopy[nbh] < 0
+					burned[nbh] = true
+					enqueue!(q, nbh)
+				end
+			end
+		end
+	end
+	
+	return burned
+end
+
+# ╔═╡ 4ff161cb-db71-443b-8816-beefa44d5a1b
+function reduce_divisor(G::TropicalCurve, D::Divisor, v::Vertex)::
+		Tuple{Divisor, LevelMap}
+	# Returns the reduced divisor D + div(f) along with the function (f)
+	
+	n = n_vertices(G)
+	away_v = 1:n .!= v # Vertices other than v
 	f = firing_matrix(G)
-
 	dist = vertex_dists(G, v)
-
-	away_v = 1:n .!= v
 
 	# fire subgraphs in layers to obtain a divisor effective away from v
 	currdiv = copy(D)
@@ -142,25 +184,7 @@ function reduce(G::TropicalCurve, D::Divisor, v::Vertex)
 	level_map = zeros(Int64, n)
 	# perform Dhar's burning algorithm
 	while true
-		q = Queue{Vertex}()
-		enqueue!(q, v)
-		burned = fill(false, n)
-		burned[v] = true
-		divcopy = copy(currdiv)
-		while length(q) > 0
-			u = dequeue!(q)
-			(neighbors, val) = findnz(G.adj_matrix[:, u])
-			for nbh in neighbors[val .> 0]
-				if !burned[nbh]
-					divcopy[nbh] -= G.adj_matrix[u, nbh]
-					if divcopy[nbh] < 0
-						burned[nbh] = true
-						enqueue!(q, nbh)
-					end
-				end
-			end
-		end
-
+		burned = dhar_algo(G, currdiv, v)
 		if all(burned)
 			break
 		end
@@ -178,21 +202,21 @@ function reduce(G::TropicalCurve, D::Divisor, v::Vertex)
 end
 
 # ╔═╡ 0f2c3b22-1886-4078-be5d-8931a6ffdba0
-function canonical(G::TropicalCurve)
+function canonical(G::TropicalCurve)::Divisor
 	valences = vec(sum(G.adj_matrix, dims=1))
 	return valences .- 2
 end
 
 # ╔═╡ 723f4022-b05a-46b2-9f6d-7e2e13bff363
-function is_canonical(G::TropicalCurve, D::Divisor)
+function is_canonical(G::TropicalCurve, D::Divisor)::Bool
 	K = canonical(G)
 	return reduce(G, K, 1)[1] == reduce(G, D, 1)[1]
 end
 
 # ╔═╡ cdf55264-b7c4-417b-8a25-364e1d1f9ed0
-function get_level_map(G::TropicalCurve, ref::Divisor, D::Divisor)
-	r1, l1 = reduce(G, ref, 1)
-	r2, l2 = reduce(G, D, 1)
+function get_level_map(G::TropicalCurve, ref::Divisor, D::Divisor)::LevelMap
+	r1, l1 = reduce_divisor(G, ref, 1)
+	r2, l2 = reduce_divisor(G, D, 1)
 	if r1 != r2
 		return nothing
 	end
@@ -201,6 +225,8 @@ end
 
 # ╔═╡ 9424ed85-5345-44ea-9a57-70a77b999fe9
 function n_edges_between(G::TropicalCurve, v1::Vertex, v2::Vertex)
+	# Returns the number of edges between two vertices.
+	# A self-edge will count twice in adj_matrix
 	return div(G.adj_matrix[v1, v2], v1 == v2 ? 2 : 1)
 end
 
@@ -212,6 +238,8 @@ struct DirEdge
 end
 
 # ╔═╡ efdc84d0-ff99-49c7-959c-cd2a8d3337c6
+# Edge will not distinguish between Edge(i, j, k) and Edge(j, i, k)
+# We always have v1 <= v2
 struct Edge
 	v1::Vertex
 	v2::Vertex
@@ -277,7 +305,10 @@ function subdivide_edge!(G::SubdividedCurve, e::Edge, f)
 end
 
 # ╔═╡ 053aeb23-3211-4b44-b7bc-94da28b5ad8c
-function subdivide_simple(G::TropicalCurve)
+function subdivide_simple(G::TropicalCurve)::SubdividedCurve
+	# Returns the simplest subdivisions that avoids parallel edges and self-loops
+	# ! Will not preserve the metric graph structure !
+	
 	n = n_vertices(G)
 
 	Gsub = SubdividedCurve(G)
@@ -297,7 +328,8 @@ function subdivide_simple(G::TropicalCurve)
 end
 
 # ╔═╡ 13a53ea3-9b81-430f-8f70-54011e3552ba
-function subdivide_uniform(G::TropicalCurve, f)
+function subdivide_uniform(G::TropicalCurve, f)::SubdividedCurve
+	# Subdivides each edge uniformly, equivalently scale the whole graph f-fold
 	n = n_vertices(G)
 
 	Gsub = SubdividedCurve(G)
@@ -312,34 +344,30 @@ function subdivide_uniform(G::TropicalCurve, f)
 end
 
 # ╔═╡ e1bbfee6-1b21-4806-9642-1233c09b0c84
-function edges_from(G::TropicalCurve, v::Vertex)
+function edges_from(G::TropicalCurve, v::Vertex)::Vector{Vertex}
+	# Returns a vector of indices of adjacent vertices, appearing with multiplicity
 	n = size(G.adj_matrix, 1)
-	Iterators.flatmap(u -> fill(u, n_edges_between(G, v, u)), 1:n) |> collect
+	return flatmap(u -> fill(u, n_edges_between(G, v, u)), 1:n)
 end
 
 # ╔═╡ fcb4e5b8-2fc0-450d-989c-0d7731186534
-function outgoing_slopes(G::TropicalCurve, v::Vertex, f::LevelMap)
+function outgoing_slopes(G::TropicalCurve, v::Vertex, f::LevelMap)::Vector{Int64}
+	# Returns a vector of outgoing slopes at v, appearing with multiplicity
 	map(u -> f[u] - f[v], edges_from(G, v))
 end
 
-# ╔═╡ b5ec41be-19c2-4f04-b73d-5e11a765b72e
-function adjlist(G::TropicalCurve; no_duplicates=false)
-	n = size(G.adj_matrix, 1)
-	if no_duplicates
-		return map(v -> filter(u -> u>=v, edges_from(G, v)), 1:n)
-	else
-		return map(v -> edges_from(G, v), 1:n)
-	end
-end
-
 # ╔═╡ 3e06ee8e-10f0-4573-a72c-32ddcddc0453
-function is_inconvenient(G::TropicalCurve, v::Vertex, f::LevelMap)
+function is_inconvenient(G::TropicalCurve, v::Vertex, f::LevelMap)::Bool
+	# Checks whether vertex is inconvenient
 	s = outgoing_slopes(G, v, f)
 	return all(s .!= 0) && -minimum(s) > sum(s[s .> 0])
 end
 
 # ╔═╡ 1d6a08d5-162a-4359-be15-c77e9547fb52
-function horizontal_edges(G::TropicalCurve, f::LevelMap)
+function horizontal_edges(G::TropicalCurve, f::LevelMap)::
+		Vector{Tuple{Vertex, Vertex}}
+	# Returns a list of horizontal edges, represented as a list of 
+	# tuples, because it does not matter which edge between two vectors we take
 	n = size(G.adj_matrix, 1)
 	l = []
 	for i in 1:n
@@ -353,26 +381,29 @@ function horizontal_edges(G::TropicalCurve, f::LevelMap)
 end
 
 # ╔═╡ 6a3174a4-93f6-40c4-ae73-f2f40483b14b
-function dfs_time(G::TropicalCurve, v::Vertex; search_simple_cycle=false)
-	n = size(G.adj_matrix, 1)
+function lies_on_cycle(G::TropicalCurve, v::Vertex)
+	# Returns true if the chosen vertex lies on some cycle in G
+	# To check this we perform a DFS and see whether we eventually 
+	# come back to v
 	
-	# find vertex distance from base using BFS
+	n = size(G.adj_matrix, 1)
 	s = Stack{Tuple{Vertex, Vertex}}() # stores (vertex, previous vertex)
 	push!(s, (v, -1))
 	time = fill(-1, n)
-	if !search_simple_cycle
-		time[v] = 0
-	end
 	t = 1
 	while length(s) > 0
 		u, prev = pop!(s)
 		if t != 1 || u != v
+			if u == v
+				return true
+			end
 			time[u] = t
 			t += 1
 		end
 		(neighbors, val) = findnz(G.adj_matrix[:, u])
 		for nbh in neighbors[val .> 0]
-			if search_simple_cycle && nbh == v && prev == v
+			# Prevent backtracking
+			if nbh == prev
 				continue
 			end
 			if time[nbh] == -1 # if vertex was not visited
@@ -380,11 +411,14 @@ function dfs_time(G::TropicalCurve, v::Vertex; search_simple_cycle=false)
 			end
 		end
 	end
-	return time
+	return false
 end
 
 # ╔═╡ e26e2225-9739-4ffe-b3f5-e0fe7ee0a8ac
 function is_realizable(G::TropicalCurve, D::Divisor)
+	# Checks whether a canonical divisor is realizable using
+	# the characterization from [MUW17] + simplifications
+	# I described in my report
 	f = get_level_map(G, canonical(G), D)
 	if isnothing(f)
 		return false
@@ -410,7 +444,7 @@ function is_realizable(G::TropicalCurve, D::Divisor)
 		vs = f .>= h
 		subgraph = TropicalCurve(G.adj_matrix[vs, vs])
 		v0 = sum(f[1: v] .>= h)
-		if dfs_time(subgraph, v0; search_simple_cycle=true)[v0] == -1
+		if !lies_on_cycle(subgraph, v0)
 			return false
 		end
 	end
@@ -426,7 +460,7 @@ end
 # ╔═╡ 0f07e51e-dbee-4d49-a35c-103c8e9f7b58
 function get_legal_level_maps(G::TropicalCurve, D::Divisor, prefix::LevelMap;
 						reduced=false, 	# in practice D should always be reduced
-						restrict_support::Union{BitVector, Nothing}=nothing)
+						restrict_support::Union{Subgraph, Nothing}=nothing)
 	# For this to work, we assume that the vertices of G are ordered so that
 	# v is connected to the subgraph supported on 1, ..., v-1 =: A
 	
@@ -517,9 +551,10 @@ end
 
 # ╔═╡ 26dc12f2-0b46-4811-8796-59f231313083
 function get_linear_system(G::TropicalCurve, D::Divisor;
-					restrict_support::Union{BitVector, Nothing}=nothing)
-	
-	D, _ = reduce(G, D, 1)
+					restrict_support::Union{BitVector, Nothing}=nothing)::
+		Vector{Divisor}
+	# Returns a list of divisors on the given linear system
+	D, _ = reduce_divisor(G, D, 1)
 	if !is_effective(D)
 		return []
 	end
@@ -548,10 +583,27 @@ function get_linear_system(G::TropicalCurve, D::Divisor;
 	return map(f -> D + fm * f, level_maps)
 end
 
+# ╔═╡ aca99b47-9e09-4bb8-9722-f44039d457c0
+function get_edge_list(G::TropicalCurve)::Vector{DirEdge}
+	# Returns a list of directed edges, where the edges are all directed
+	# from smaller to bigger vertices
+	n = n_vertices(G)
+	edge_list = Vector{DirEdge}(undef, 0)
+	for u = 1:n, v = u:n, i = 1:n_edges_between(G, u, v)
+		push!(edge_list, DirEdge(u, v, i))
+	end
+	return edge_list
+end
+
+# ╔═╡ 57e98040-f315-42b0-be1e-8904bb6087f0
+SlopeData = Dict{DirEdge, Tuple{Int64, Int64}}
+
 # ╔═╡ ba997d28-f684-4815-89ca-241964958177
-function get_possible_slopes(E::Vector{DirEdge}, D::Divisor)
+function get_possible_slopes(E::AbstractVector{DirEdge}, D::Divisor)::
+		Vector{SlopeData}
+	# Returns a vector of slope configurations that can fire given divisor D
 	if isempty(E)
-		return Dict{}
+		return [SlopeData()]
 	end
 
 	e = E[1]
@@ -563,9 +615,12 @@ function get_possible_slopes(E::Vector{DirEdge}, D::Divisor)
 			if s1*s2 == 0 && s1 + s2 > 0
 				continue
 			end
-			slopes = get_possible_slopes(view(E, 2:length(view)))
+			newD = copy(D)
+			newD[e.v1] -= s1
+			newD[e.v2] -= s2
+			slopes = get_possible_slopes(view(E, 2:length(E)), newD)
 			for slopes_data in slopes
-				slopes_data[e] = (s1, s2)
+				slopes_data[e] = (-s1, -s2)
 			end
 			append!(possible_slopes, slopes)
 		end
@@ -574,19 +629,177 @@ function get_possible_slopes(E::Vector{DirEdge}, D::Divisor)
 	return possible_slopes
 end
 
-# ╔═╡ 3fed3606-ece2-42b9-b83a-68190dd46b6f
-function get_extremals(G::TropicalCurve, D::Divisor)
-	linsys = get_linear_system(G, D)
-	for divisor in linsys
-		edges = get_edge_list(G)
-		slopes = get_possible_slopes(edges, divisor)
-		for slope_data in slopes
-			# Check if it is extremal using criterion.
+# ╔═╡ 8070f968-2f7c-4e6c-9592-b09027cc8e73
+function is_connected(G::TropicalCurve)::Bool
+	return all(vertex_dists(G, 1) .!= -1)
+end
+
+# ╔═╡ 2526ddb5-1442-457e-905a-ea4f0eae34e5
+function has_smooth_cut_set(G::TropicalCurve, slope_data::SlopeData)::Bool
+	# Remove edges that have a chip on their interior and check if the result is connected
+	Gcopy = deepcopy(G)
+	for (edge, slopes) in slope_data
+		if slopes != (0, 0)
+			remove_edge!(Gcopy, edge.v1, edge.v2)
 		end
 	end
+	return !is_connected(Gcopy)
+end
+
+# ╔═╡ 1045209f-8e64-45e8-82da-570ac976dc9b
+function has_self_loops(G::TropicalCurve)::Bool
+	any(diag(G.adj_matrix) == 0)
+end
+
+# ╔═╡ 5afa3ff6-2927-4a1e-b7f8-a7aac5752733
+function represent_divisor(G::TropicalCurve, D::Divisor, slope_data::SlopeData)::
+		Tuple{SubdividedCurve, Divisor}
+	n = n_vertices(G)
+	# We will need to subdivide the graph so that the resulting divisor is supported
+	# on vertices, so take the LCM of the needed subdivisions of all edges
+	factor = reduce(lcm,
+		map(slope -> max(-sum(slope), 1), values(slope_data)); 
+		init=1)
+	# We multiply by a factor of 2 to ensure no points in the support of the divisor
+	# are adjacent
+	factor *= 2
+
+	# Now we need to add the chips on the right vertices according to the slopes
+	Gsub = subdivide_uniform(G, factor)
+	nsub = n_vertices(Gsub.curve)
+	Dsub = zeros(Int64, nsub)
+	Dsub[1:n] = D
+	for (edge, slopes) in slope_data
+		if slopes != (0, 0)
+			vs = Gsub.added_vertices[Edge(edge)]
+			v = vs[div(slopes[2] * factor, sum(slopes))]
+			Dsub[v] += -sum(slopes)
+			# Slopes are negative, so this subtracts the chips from the vertices
+			Dsub[edge.v1] += slopes[1]
+			Dsub[edge.v2] += slopes[2]
+		end
+	end
+	return (Gsub, Dsub)
+end
+
+# ╔═╡ 9d480c59-b627-4ca5-a5a6-48e6bb08c6c2
+function is_cover(G::TropicalCurve, A1::Subgraph, A2::Subgraph)::Bool
+	# Checks whether two subgraphs are a cover
+	# They need to cover all nodes and there should be no edges between points in
+	# A1 and A2 that are contained in neither of these subgraphs
+	all(A1 .| A2) && all(G.adj_matrix[A1 .& .!A2, A2 .& .!A1] .== 0)
+end
+
+# ╔═╡ 5d7ee293-f0fe-470e-8998-7c2e5a504ee6
+function chipfire_comps(G::TropicalCurve, D::Divisor)::Vector{Subgraph}
+	# Find all (closures of) connected components of G\supp D,
+	# This function assumes that G is subdivided enough so that
+	# there are no adjacent points in supp D
+	n = n_vertices(G)
+	# Initially we skip only the support of D, but then we will skip also any vertex
+	# previously visited
+	exclude = D .> 0
+	comps = []
+	for v = 1:n
+		if exclude[v]
+			continue
+		end
+		visited = fill(false, n)
+		visited[v] = true
+		
+		# find vertices in connected component using BFS
+		q = Queue{Vertex}()
+		enqueue!(q, v)
+		while length(q) > 0
+			u = dequeue!(q)
+			(neighbors, val) = findnz(G.adj_matrix[:, u])
+			for nbh in neighbors[val .> 0]
+				if !visited[nbh]
+					visited[nbh] = true
+					if !exclude[nbh]
+						enqueue!(q, nbh)
+					end
+				end
+			end
+		end
+		# Exclude visited vertex to not have duplicate connected components
+		exclude .|= visited
+		
+		push!(comps, visited)
+	end
+	return comps
+end
+
+# ╔═╡ 70c72ae6-ebaf-4c5f-a046-63e9ab6dcdcd
+function is_extremal(G::TropicalCurve, D::Divisor)::Bool
+	# This function checks whether D is extremal using Lemma 5 from [HMY09]
+	# i.e. it checks whether there are some two closed subgraphs that cover
+	# G and both can fire
+	n = n_vertices(G)
+	f = firing_matrix(G)
+	# Only combinations of (closures of) connected components of G can fire
+	comps = chipfire_comps(G, D)
+	N = length(comps)
+	m = 2^N - 1
+	# c1, c2 represent in binary a choice of sets in `comps`
+	for c1 = 0:m
+		# convert c1 to a BitVector and take the union of these sets
+		A1 = reduce(.|, comps[BitVector(digits(c1, base=2, pad=N))];
+					init=Subgraph(fill(false, n)))
+		# A1 has to be a proper subset, so skip if A1 is the full graph
+		if all(A1)
+			continue
+		end
+		for c2 = 0:m
+			A2 = reduce(.|, comps[BitVector(digits(c2, base=2, pad=N))];
+						init=Subgraph(fill(false, n)))
+			if all(A2)
+				continue
+			end
+			# Check whether the A_i cover G and can both fire
+			if is_cover(G, A1, A2) && is_effective(D + f*A1) && is_effective(D + f*A2)
+				return false
+			end
+		end
+	end
+	return true
+end
+
+# ╔═╡ 3fed3606-ece2-42b9-b83a-68190dd46b6f
+function get_extremals(G::TropicalCurve, D::Divisor)::
+										Vector{Tuple{SubdividedCurve, Divisor}}
+	# Returns a list of extremals on a suitably subdivided curve
+	# Since extremals have no smooth cut set, the values of a rational function
+	# on the vertices are all integral, so we can find the vertices that belong
+	# to the linear system and are supported on the vertices
+	linsys = get_linear_system(G, D)
+	extremals = []
+	for divisor in linsys
+		edges = get_edge_list(G)
+		# Any extremal will be obtained by specifying a slope on all half-edges,
+		# which keeps the divisor effective
+		slopes = get_possible_slopes(edges, divisor)
+		for slope_data in slopes
+			# We can skip if there is a cut set, as the subsequent calculation
+			# is more expensive
+			if has_smooth_cut_set(G, slope_data)
+				continue
+			end
+			# Represent the divisor on a subdivided curve
+			# The returned curve is subdivided enough so that no two points of 
+			# the support of Dsub are adjacent
+			Gsub, Dsub = represent_divisor(G, divisor, slope_data)
+			if is_extremal(Gsub.curve, Dsub)
+				push!(extremals, (Gsub, Dsub))
+			end
+		end
+	end
+	return extremals
 end
 
 # ╔═╡ eb2181b7-6745-435e-a1c7-440bf6b998d4
+# ╠═╡ disabled = true
+#=╠═╡
 function get_edge_degs(G::SubdividedCurve, D::Divisor)
 	degs = Dict()
 	for v = n_vertices(G.original_curve) + 1:length(D)
@@ -599,19 +812,23 @@ function get_edge_degs(G::SubdividedCurve, D::Divisor)
 	end
 	return degs
 end
+  ╠═╡ =#
 
 # ╔═╡ 74f9914d-1ed4-4b94-8222-74cac97eea1a
 begin
 	G = TropicalCurve(4)
-	add_edge!(G, 1, 4)
-	add_edge!(G, 2, 4)
-	add_edge!(G, 3, 4)
 	add_edge!(G, 1, 1)
 	add_edge!(G, 2, 2)
 	add_edge!(G, 3, 3)
+	add_edge!(G, 1, 4)
+	add_edge!(G, 2, 4)
+	add_edge!(G, 3, 4)
 	
-	Gsub = subdivide_uniform(G, 5)
+	Gsub = subdivide_uniform(G, 2)
 end
+
+# ╔═╡ 7bfdfd4d-0528-45a7-8e32-3786dea43490
+extremals = get_extremals(G, canonical(G))
 
 # ╔═╡ c40dd6b8-d2b2-4cff-bafb-45881121ad7b
 # Can calculate pseudo-inverse of firing matrix
@@ -636,8 +853,7 @@ canonical(G) - firing_matrix(G) * f2
   ╠═╡ =#
 
 # ╔═╡ 9fb142ec-fc14-4d27-ae75-22937390a556
-linsys = get_linear_system(G, canonical(G);
-			restrict_support=BitVector([true, true, true, true, true, true]))
+linsys = get_linear_system(G, canonical(G))
 
 # ╔═╡ cdffab39-0e2e-4689-b7c4-4b526f7c07ee
 length(linsys)
@@ -651,6 +867,23 @@ linsyssub = get_linear_system(Gsub.curve, canonical(Gsub.curve);
 
 # ╔═╡ 909f79dd-df94-4251-963f-d2f7a4659c39
 length(linsyssub)
+
+# ╔═╡ b5ec41be-19c2-4f04-b73d-5e11a765b72e
+function adjlist(G::TropicalCurve)
+	# Returns an adjacency list suitable for rendering with GraphRecipes
+	# Alternates directed edges between nodes
+	n = size(G.adj_matrix, 1)
+	l = map(_ -> [], 1:n)
+	for i = 1:n, j = i:n
+		n_edges = n_edges_between(G, i, j)
+		append!(l[i], fill(j, floor(Int64, n_edges/2)))
+		append!(l[j], fill(i, ceil(Int64, n_edges/2)))
+	end
+	return l
+end
+
+# ╔═╡ b45005fd-89ac-4fda-b5ac-f8a2eb4f4071
+adjlist(G)
 
 # ╔═╡ 6bf0055a-26d6-4e59-96e7-88d4aa104983
 function plotcurve(G::TropicalCurve; 
@@ -667,7 +900,7 @@ function plotcurve(G::TropicalCurve;
 	if isempty(weights)
 		weights = labels .> 0
 	end
-	graphplot(adjlist(G, no_duplicates=true);
+	graphplot(adjlist(G);
 		names=labels != nothing ? labels : 1:n,
 		nodecolor=color, 
 		self_edge_size=0.2,
@@ -692,6 +925,12 @@ plotcurve(G; labels=linsys[i], nodesize=0.2)
 # ╔═╡ fbf87769-b401-4082-a8c0-1775dd444978
 realizable_divs = map(D -> is_realizable(Gsub.curve, D), linsyssub)
 
+# ╔═╡ 4c736d45-4234-4048-a704-ea9e97beed5a
+realizable_indices = (1:length(linsyssub))[realizable_divs]
+
+# ╔═╡ 4cd7965b-7d8b-4cca-8977-6a2ff16be6b3
+nonrealizable_indices = (1:length(linsyssub))[.!realizable_divs]
+
 # ╔═╡ 3693da51-d30c-4df9-8292-348065f3e89f
 @bind j Slider(1:length(linsyssub))
 
@@ -701,11 +940,45 @@ plotcurve(Gsub.curve;
 	color=realizable_divs[j] ? "white" : "red",
 	nodesize=0.1)
 
+# ╔═╡ 91609fae-5ab3-45aa-96b6-962ce3240268
+@bind j1 Slider(1:length(realizable_indices))
+
+# ╔═╡ bb5742f8-8e2e-4665-a5db-60b8d3a0cb2f
+# Plot only realizable divisors
+plotcurve(Gsub.curve;
+	labels=linsyssub[realizable_indices[j1]], 
+	nodesize=0.1)
+
+# ╔═╡ bd64b2dd-0763-4f9b-a05b-7096e697047e
+@bind j2 Slider(1:length(nonrealizable_indices))
+
+# ╔═╡ a06ecb0c-9b1b-41e4-874a-2e88493a38f4
+# Plot only non-realizable divisors
+plotcurve(Gsub.curve;
+	labels=linsyssub[nonrealizable_indices[j2]], 
+	color="red",
+	nodesize=0.1)
+
 # ╔═╡ e3a335b8-3708-4a33-a1f3-49cdbb461530
 simple = subdivide_simple(G)
 
 # ╔═╡ 49136ab0-1773-4d44-94e4-0832a4ab7d1b
+# Simple subdivision
 plotcurve(simple.curve; labels=canonical(simple.curve), nodesize=0.2)
+
+# ╔═╡ 892147af-cbc1-4600-8656-bb58c4fa3a37
+@bind k Slider(1:length(extremals))
+
+# ╔═╡ c3286803-f241-45b1-91d2-f01387543290
+# Plot extremals
+begin
+	curve = extremals[k][1].curve
+	divisor = extremals[k][2]
+	realizable = is_realizable(curve, divisor)
+	plotcurve(curve; labels=divisor,
+		color=realizable ? "white" : "red",
+		nodesize=0.05)
+end
 
 # ╔═╡ 24e0d3ea-182b-425e-9ead-234c5598783a
 # ╠═╡ disabled = true
@@ -2220,10 +2493,12 @@ version = "1.4.1+1"
 
 # ╔═╡ Cell order:
 # ╠═5b6ee372-4155-4b7f-967f-f399fadf224f
+# ╠═da3f8c95-d1ab-4763-a247-1e4ad41971dc
 # ╠═b27f2982-568f-4ccf-8678-da0a9a5545c2
 # ╠═4646aec5-4b8d-440f-aca0-50aaac01d966
 # ╠═fbbc5547-47f2-4a2a-99e8-e1e1e0f285c0
 # ╠═ce56d3ea-55fd-4f43-b4f7-37285069a7bc
+# ╠═48c2b423-e2d0-42a5-b608-d6aaf7c774ea
 # ╠═8e9b8b9c-fb40-4a5c-bddb-b801ff8078d2
 # ╠═4cf3a8d1-f7c8-405a-9f48-92039c4facfe
 # ╠═a25b1d8c-dd98-49a3-aa5d-c2027fd69bfd
@@ -2231,6 +2506,7 @@ version = "1.4.1+1"
 # ╠═10e8fdd1-5f33-4e3e-b448-acd3f0c5950d
 # ╠═b49575a6-cb0f-44b1-9f92-d49e8c254e57
 # ╠═ed442fb5-16fc-4827-81b5-b13f8e64230b
+# ╠═3cff152b-3946-4eac-a231-7e795884718c
 # ╠═4ff161cb-db71-443b-8816-beefa44d5a1b
 # ╠═0f2c3b22-1886-4078-be5d-8931a6ffdba0
 # ╠═723f4022-b05a-46b2-9f6d-7e2e13bff363
@@ -2242,10 +2518,8 @@ version = "1.4.1+1"
 # ╠═f4bb5b5c-1087-4c73-be81-985bc6e16735
 # ╠═053aeb23-3211-4b44-b7bc-94da28b5ad8c
 # ╠═13a53ea3-9b81-430f-8f70-54011e3552ba
-# ╠═040b6adb-21a1-4657-b15c-660e0130ec1c
 # ╠═e1bbfee6-1b21-4806-9642-1233c09b0c84
 # ╠═fcb4e5b8-2fc0-450d-989c-0d7731186534
-# ╠═b5ec41be-19c2-4f04-b73d-5e11a765b72e
 # ╠═3e06ee8e-10f0-4573-a72c-32ddcddc0453
 # ╠═1d6a08d5-162a-4359-be15-c77e9547fb52
 # ╠═6a3174a4-93f6-40c4-ae73-f2f40483b14b
@@ -2253,10 +2527,20 @@ version = "1.4.1+1"
 # ╠═13eff3d5-9f33-45f3-9034-e3563ab10349
 # ╠═0f07e51e-dbee-4d49-a35c-103c8e9f7b58
 # ╠═26dc12f2-0b46-4811-8796-59f231313083
+# ╠═aca99b47-9e09-4bb8-9722-f44039d457c0
+# ╠═57e98040-f315-42b0-be1e-8904bb6087f0
 # ╠═ba997d28-f684-4815-89ca-241964958177
+# ╠═8070f968-2f7c-4e6c-9592-b09027cc8e73
+# ╠═2526ddb5-1442-457e-905a-ea4f0eae34e5
+# ╠═1045209f-8e64-45e8-82da-570ac976dc9b
+# ╠═5afa3ff6-2927-4a1e-b7f8-a7aac5752733
+# ╠═9d480c59-b627-4ca5-a5a6-48e6bb08c6c2
+# ╠═5d7ee293-f0fe-470e-8998-7c2e5a504ee6
+# ╠═70c72ae6-ebaf-4c5f-a046-63e9ab6dcdcd
 # ╠═3fed3606-ece2-42b9-b83a-68190dd46b6f
 # ╠═eb2181b7-6745-435e-a1c7-440bf6b998d4
 # ╠═74f9914d-1ed4-4b94-8222-74cac97eea1a
+# ╠═7bfdfd4d-0528-45a7-8e32-3786dea43490
 # ╠═da542061-f041-49ce-8011-805e5bf5ae57
 # ╠═c40dd6b8-d2b2-4cff-bafb-45881121ad7b
 # ╠═b59af1a1-c60a-4ea1-aa74-c2b0c5e5e4ad
@@ -2268,16 +2552,27 @@ version = "1.4.1+1"
 # ╠═8847e6a0-50de-4f4e-9ed0-881afe266418
 # ╠═909f79dd-df94-4251-963f-d2f7a4659c39
 # ╠═e9ba3993-aa02-4c33-98b9-3cbe4623ad28
+# ╠═040b6adb-21a1-4657-b15c-660e0130ec1c
+# ╠═b5ec41be-19c2-4f04-b73d-5e11a765b72e
+# ╠═b45005fd-89ac-4fda-b5ac-f8a2eb4f4071
 # ╠═6bf0055a-26d6-4e59-96e7-88d4aa104983
 # ╠═e7225052-be4a-4a31-baa1-53c82231a7c7
 # ╠═3c99d56f-6eee-460c-acae-528e7fa72b62
 # ╠═4e1ae109-550c-4b30-86d0-894f66187b41
 # ╠═f43e1972-394d-4606-9ff9-de3d7beabf53
 # ╠═fbf87769-b401-4082-a8c0-1775dd444978
+# ╠═4c736d45-4234-4048-a704-ea9e97beed5a
+# ╠═4cd7965b-7d8b-4cca-8977-6a2ff16be6b3
 # ╠═3693da51-d30c-4df9-8292-348065f3e89f
 # ╠═0df36f16-4b8c-408b-8732-2af134f30b01
+# ╠═91609fae-5ab3-45aa-96b6-962ce3240268
+# ╠═bb5742f8-8e2e-4665-a5db-60b8d3a0cb2f
+# ╠═bd64b2dd-0763-4f9b-a05b-7096e697047e
+# ╠═a06ecb0c-9b1b-41e4-874a-2e88493a38f4
 # ╠═e3a335b8-3708-4a33-a1f3-49cdbb461530
 # ╠═49136ab0-1773-4d44-94e4-0832a4ab7d1b
+# ╠═892147af-cbc1-4600-8656-bb58c4fa3a37
+# ╠═c3286803-f241-45b1-91d2-f01387543290
 # ╠═24e0d3ea-182b-425e-9ead-234c5598783a
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
