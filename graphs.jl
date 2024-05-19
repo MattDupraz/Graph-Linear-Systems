@@ -40,13 +40,16 @@ function flatmap(f, col)
 	return Iterators.flatmap(f, col) |> collect
 end
 
+# ╔═╡ eb18d648-1e05-4e22-ae9b-8e5c7387c360
+abstract type AbstractCurve end
+
 # ╔═╡ b27f2982-568f-4ccf-8678-da0a9a5545c2
 Vertex = Int64
 
 # ╔═╡ 4646aec5-4b8d-440f-aca0-50aaac01d966
 # A tropical curve is represented by a finite graph with possible loops and parallel
 # edges. The edges are all considered to be of length 1
-mutable struct TropicalCurve
+mutable struct TropicalCurve <: AbstractCurve
 	# The adjacency matrix stores the number of edges between two vertices (counted twice for self-edges)
 	adj_matrix::SparseMatrixCSC{Int64, Vertex}
 	function TropicalCurve(n::Int64)
@@ -60,6 +63,11 @@ mutable struct TropicalCurve
 	end
 end
 
+# ╔═╡ 13478274-4dcf-4763-b826-fc339f758d9c
+function adj_matrix(G::TropicalCurve)::AbstractMatrix{Int64}
+	return G.adj_matrix
+end
+
 # ╔═╡ fbbc5547-47f2-4a2a-99e8-e1e1e0f285c0
 Divisor = AbstractVector{Int64}
 
@@ -68,11 +76,6 @@ LevelMap = AbstractVector{Int64}
 
 # ╔═╡ 48c2b423-e2d0-42a5-b608-d6aaf7c774ea
 Subgraph = BitVector
-
-# ╔═╡ 8e9b8b9c-fb40-4a5c-bddb-b801ff8078d2
-function n_vertices(G::TropicalCurve)
-	return size(G.adj_matrix, 1)
-end
 
 # ╔═╡ 4cf3a8d1-f7c8-405a-9f48-92039c4facfe
 function add_vertices!(G::TropicalCurve, n)
@@ -98,23 +101,73 @@ function remove_edge!(G::TropicalCurve, v1::Vertex, v2::Vertex)
 end
 
 # ╔═╡ 10e8fdd1-5f33-4e3e-b448-acd3f0c5950d
-function firing_matrix(adj_matrix::AbstractMatrix{Int64})
+function firing_matrix(adj::AbstractMatrix{Int64})
 	# The firing matrix is the matrix F such that
 	# F*[f] = [div(f)]
-	valences = sum(adj_matrix, dims=1)
-	return adj_matrix - spdiagm(0 => vec(valences))
+	valences = sum(adj, dims=1)
+	return adj - spdiagm(0 => vec(valences))
+end
+
+# ╔═╡ 31ee27fc-be3f-41d3-a972-2b1d3314dfd3
+# Directed edge
+struct DirEdge
+	v1::Vertex
+	v2::Vertex
+	i::Int64 # index of edge, there may be multiple edges between two vertices
+end
+
+# ╔═╡ efdc84d0-ff99-49c7-959c-cd2a8d3337c6
+# Edge will not distinguish between Edge(i, j, k) and Edge(j, i, k)
+# We always have v1 <= v2
+struct Edge
+	v1::Vertex
+	v2::Vertex
+	i::Int64
+	function Edge(v1, v2, i)
+		new(min(v1, v2), max(v1, v2), i)
+	end
+	function Edge(e::DirEdge)
+		Edge(e.v1, e.v2, e.i)
+	end
+end
+
+# ╔═╡ f695a6b7-e1dc-4f8b-80ac-88acf356ad13
+# Data structure to record data about subdivisions
+# The topology of the curve should not be changed after subdivision
+# (i.e. no added edges)
+mutable struct SubdividedCurve <: AbstractCurve
+	curve::TropicalCurve
+	original_curve::TropicalCurve
+	added_vertices::Dict{Edge, Vector{Vertex}}
+	supporting_edge::Dict{Vertex, Edge}
+	function SubdividedCurve(G::TropicalCurve)
+		new(deepcopy(G), G, Dict{Edge, Vector{Vertex}}(), Dict{Vertex, Edge}())
+	end
+	function SubdividedCurve(G::SubdividedCurve)
+		deepcopy(G)
+	end
+end
+
+# ╔═╡ f0f66a4f-7b3d-485a-a0c3-5a726a075d5b
+function adj_matrix(G::SubdividedCurve)
+	return adj_matrix(G.curve)
+end
+
+# ╔═╡ 8e9b8b9c-fb40-4a5c-bddb-b801ff8078d2
+function n_vertices(G::AbstractCurve)
+	return size(adj_matrix(G), 1)
 end
 
 # ╔═╡ b49575a6-cb0f-44b1-9f92-d49e8c254e57
-function firing_matrix(G::TropicalCurve)
-	return firing_matrix(G.adj_matrix)
+function firing_matrix(G::AbstractCurve)
+	return firing_matrix(adj_matrix(G))
 end
 
 # ╔═╡ ed442fb5-16fc-4827-81b5-b13f8e64230b
-function vertex_dists(G::TropicalCurve, v::Vertex)::Vector{Int64}
+function vertex_dists(G::AbstractCurve, v::Vertex)::Vector{Int64}
 	# Returns a vector containing the distances of each vertex from the given
 	# vertex v.
-	n = size(G.adj_matrix, 1)
+	n = n_vertices(G)
 	
 	# find vertex distance from base using BFS
 	q = Queue{Vertex}()
@@ -123,7 +176,7 @@ function vertex_dists(G::TropicalCurve, v::Vertex)::Vector{Int64}
 	dist[v] = 0
 	while length(q) > 0
 		u = dequeue!(q)
-		(neighbors, val) = findnz(G.adj_matrix[:, u])
+		(neighbors, val) = findnz(adj_matrix(G)[:, u])
 		for nbh in neighbors[val .> 0]
 			if dist[nbh] == -1 # if vertex was not visited
 				dist[nbh] = max(0, dist[u]) + 1
@@ -135,7 +188,7 @@ function vertex_dists(G::TropicalCurve, v::Vertex)::Vector{Int64}
 end
 
 # ╔═╡ 3cff152b-3946-4eac-a231-7e795884718c
-function dhar_algo(G::TropicalCurve, D::Divisor, v::Vertex)::Subgraph
+function dhar_algo(G::AbstractCurve, D::Divisor, v::Vertex)::Subgraph
 	# Performs Dhar's Burning Algorithm to find a minimal subgraph whose complement can fire
 	n = n_vertices(G)
 	
@@ -146,10 +199,10 @@ function dhar_algo(G::TropicalCurve, D::Divisor, v::Vertex)::Subgraph
 	Dcopy = copy(D)
 	while length(q) > 0
 		u = dequeue!(q)
-		(neighbors, val) = findnz(G.adj_matrix[:, u])
+		(neighbors, val) = findnz(adj_matrix(G)[:, u])
 		for nbh in neighbors[val .> 0]
 			if !burned[nbh]
-				Dcopy[nbh] -= G.adj_matrix[u, nbh]
+				Dcopy[nbh] -= adj_matrix(G)[u, nbh]
 				if Dcopy[nbh] < 0
 					burned[nbh] = true
 					enqueue!(q, nbh)
@@ -162,7 +215,7 @@ function dhar_algo(G::TropicalCurve, D::Divisor, v::Vertex)::Subgraph
 end
 
 # ╔═╡ 4ff161cb-db71-443b-8816-beefa44d5a1b
-function reduce_divisor(G::TropicalCurve, D::Divisor, v::Vertex)::
+function reduce_divisor(G::AbstractCurve, D::Divisor, v::Vertex)::
 		Tuple{Divisor, LevelMap}
 	# Returns the reduced divisor D + div(f) along with the function (f)
 	
@@ -194,27 +247,13 @@ function reduce_divisor(G::TropicalCurve, D::Divisor, v::Vertex)::
 			currdiv = nextdiv
 			level_map += .!burned
 		end
-		#currdiv += f * .!burned
-		#level_map += .!burned
 	end
 
 	return currdiv, level_map
 end
 
-# ╔═╡ 0f2c3b22-1886-4078-be5d-8931a6ffdba0
-function canonical(G::TropicalCurve)::Divisor
-	valences = vec(sum(G.adj_matrix, dims=1))
-	return valences .- 2
-end
-
-# ╔═╡ 723f4022-b05a-46b2-9f6d-7e2e13bff363
-function is_canonical(G::TropicalCurve, D::Divisor)::Bool
-	K = canonical(G)
-	return reduce(G, K, 1)[1] == reduce(G, D, 1)[1]
-end
-
 # ╔═╡ cdf55264-b7c4-417b-8a25-364e1d1f9ed0
-function get_level_map(G::TropicalCurve, ref::Divisor, D::Divisor)::LevelMap
+function get_level_map(G::AbstractCurve, ref::Divisor, D::Divisor)::LevelMap
 	r1, l1 = reduce_divisor(G, ref, 1)
 	r2, l2 = reduce_divisor(G, D, 1)
 	if r1 != r2
@@ -223,52 +262,32 @@ function get_level_map(G::TropicalCurve, ref::Divisor, D::Divisor)::LevelMap
 	return l1 - l2
 end
 
+# ╔═╡ 50de02d3-5aff-4fad-9f01-ffe186f14b08
+function get_valences(G::AbstractCurve)::Vector{Int64}
+	return vec(sum(adj_matrix(G), dims=1))
+end
+
+# ╔═╡ 0f2c3b22-1886-4078-be5d-8931a6ffdba0
+function canonical(G::AbstractCurve)::Divisor
+	return get_valences(G) .- 2
+end
+
+# ╔═╡ 723f4022-b05a-46b2-9f6d-7e2e13bff363
+function is_canonical(G::AbstractCurve, D::Divisor)::Bool
+	K = canonical(G)
+	return reduce(G, K, 1)[1] == reduce(G, D, 1)[1]
+end
+
 # ╔═╡ 9424ed85-5345-44ea-9a57-70a77b999fe9
-function n_edges_between(G::TropicalCurve, v1::Vertex, v2::Vertex)
+function n_edges_between(G::AbstractCurve, v1::Vertex, v2::Vertex)
 	# Returns the number of edges between two vertices.
 	# A self-edge will count twice in adj_matrix
-	return div(G.adj_matrix[v1, v2], v1 == v2 ? 2 : 1)
-end
-
-# ╔═╡ 31ee27fc-be3f-41d3-a972-2b1d3314dfd3
-struct DirEdge
-	v1::Vertex
-	v2::Vertex
-	i::Int64
-end
-
-# ╔═╡ efdc84d0-ff99-49c7-959c-cd2a8d3337c6
-# Edge will not distinguish between Edge(i, j, k) and Edge(j, i, k)
-# We always have v1 <= v2
-struct Edge
-	v1::Vertex
-	v2::Vertex
-	i::Int64
-	function Edge(v1, v2, i)
-		new(min(v1, v2), max(v1, v2), i)
-	end
-	function Edge(e::DirEdge)
-		Edge(e.v1, e.v2, e.i)
-	end
-end
-
-# ╔═╡ f695a6b7-e1dc-4f8b-80ac-88acf356ad13
-# Data structure to record data about subdivisions
-# The topology of the curve should not be changed after subdivision
-# (i.e. no added edges)
-mutable struct SubdividedCurve
-	curve::TropicalCurve
-	original_curve::TropicalCurve
-	added_vertices::Dict{Edge, Vector{Vertex}}
-	supporting_edge::Dict{Vertex, Edge}
-	function SubdividedCurve(G::TropicalCurve)
-		new(deepcopy(G), G, Dict{Edge, Vector{Vertex}}(), Dict{Vertex, Edge}())
-	end
+	return div(adj_matrix(G)[v1, v2], v1 == v2 ? 2 : 1)
 end
 
 # ╔═╡ f4bb5b5c-1087-4c73-be81-985bc6e16735
 function subdivide_edge!(G::SubdividedCurve, e::Edge, f)
-	n = n_vertices(G.curve)
+	n = n_vertices(G)
 	n_orig = n_vertices(G.original_curve)
 
 	# Supporting edge in the original graph, in case multiple subdivisions
@@ -305,7 +324,7 @@ function subdivide_edge!(G::SubdividedCurve, e::Edge, f)
 end
 
 # ╔═╡ 053aeb23-3211-4b44-b7bc-94da28b5ad8c
-function subdivide_simple(G::TropicalCurve)::SubdividedCurve
+function subdivide_simple(G::AbstractCurve)::SubdividedCurve
 	# Returns the simplest subdivisions that avoids parallel edges and self-loops
 	# ! Will not preserve the metric graph structure !
 	
@@ -328,7 +347,7 @@ function subdivide_simple(G::TropicalCurve)::SubdividedCurve
 end
 
 # ╔═╡ 13a53ea3-9b81-430f-8f70-54011e3552ba
-function subdivide_uniform(G::TropicalCurve, f)::SubdividedCurve
+function subdivide_uniform(G::AbstractCurve, f)::SubdividedCurve
 	# Subdivides each edge uniformly, equivalently scale the whole graph f-fold
 	n = n_vertices(G)
 
@@ -344,35 +363,35 @@ function subdivide_uniform(G::TropicalCurve, f)::SubdividedCurve
 end
 
 # ╔═╡ e1bbfee6-1b21-4806-9642-1233c09b0c84
-function edges_from(G::TropicalCurve, v::Vertex)::Vector{Vertex}
+function edges_from(G::AbstractCurve, v::Vertex)::Vector{Vertex}
 	# Returns a vector of indices of adjacent vertices, appearing with multiplicity
-	n = size(G.adj_matrix, 1)
+	n = size(adj_matrix(G), 1)
 	return flatmap(u -> fill(u, n_edges_between(G, v, u)), 1:n)
 end
 
 # ╔═╡ fcb4e5b8-2fc0-450d-989c-0d7731186534
-function outgoing_slopes(G::TropicalCurve, v::Vertex, f::LevelMap)::Vector{Int64}
+function outgoing_slopes(G::AbstractCurve, v::Vertex, f::LevelMap)::Vector{Int64}
 	# Returns a vector of outgoing slopes at v, appearing with multiplicity
 	map(u -> f[u] - f[v], edges_from(G, v))
 end
 
 # ╔═╡ 3e06ee8e-10f0-4573-a72c-32ddcddc0453
-function is_inconvenient(G::TropicalCurve, v::Vertex, f::LevelMap)::Bool
+function is_inconvenient(G::AbstractCurve, v::Vertex, f::LevelMap)::Bool
 	# Checks whether vertex is inconvenient
 	s = outgoing_slopes(G, v, f)
 	return all(s .!= 0) && -minimum(s) > sum(s[s .> 0])
 end
 
 # ╔═╡ 1d6a08d5-162a-4359-be15-c77e9547fb52
-function horizontal_edges(G::TropicalCurve, f::LevelMap)::
+function horizontal_edges(G::AbstractCurve, f::LevelMap)::
 		Vector{Tuple{Vertex, Vertex}}
 	# Returns a list of horizontal edges, represented as a list of 
 	# tuples, because it does not matter which edge between two vectors we take
-	n = size(G.adj_matrix, 1)
+	n = n_vertices(G)
 	l = []
 	for i in 1:n
 		for j in i:n
-			if G.adj_matrix[i, j] > 0 && f[i] == f[j]
+			if adj_matrix(G)[i, j] > 0 && f[i] == f[j]
 				push!(l, (i, j))
 			end
 		end
@@ -381,12 +400,12 @@ function horizontal_edges(G::TropicalCurve, f::LevelMap)::
 end
 
 # ╔═╡ 6a3174a4-93f6-40c4-ae73-f2f40483b14b
-function lies_on_cycle(G::TropicalCurve, v::Vertex)
+function lies_on_cycle(G::AbstractCurve, v::Vertex)
 	# Returns true if the chosen vertex lies on some cycle in G
 	# To check this we perform a DFS and see whether we eventually 
 	# come back to v
 	
-	n = size(G.adj_matrix, 1)
+	n = n_vertices(G)
 	s = Stack{Tuple{Vertex, Vertex}}() # stores (vertex, previous vertex)
 	push!(s, (v, -1))
 	time = fill(-1, n)
@@ -400,7 +419,7 @@ function lies_on_cycle(G::TropicalCurve, v::Vertex)
 			time[u] = t
 			t += 1
 		end
-		(neighbors, val) = findnz(G.adj_matrix[:, u])
+		(neighbors, val) = findnz(adj_matrix(G)[:, u])
 		for nbh in neighbors[val .> 0]
 			# Prevent backtracking
 			if nbh == prev
@@ -415,7 +434,7 @@ function lies_on_cycle(G::TropicalCurve, v::Vertex)
 end
 
 # ╔═╡ e26e2225-9739-4ffe-b3f5-e0fe7ee0a8ac
-function is_realizable(G::TropicalCurve, D::Divisor)
+function is_realizable(G::AbstractCurve, D::Divisor)
 	# Checks whether a canonical divisor is realizable using
 	# the characterization from [MUW17] + simplifications
 	# I described in my report
@@ -424,12 +443,12 @@ function is_realizable(G::TropicalCurve, D::Divisor)
 		return false
 	end
 
-	n = size(G.adj_matrix, 1)
+	n = n_vertices(G)
 
 	for edge in horizontal_edges(G, f)
 		h = f[edge[1]]
 		vs = f .>= h
-		subgraph = TropicalCurve(G.adj_matrix[vs, vs])
+		subgraph = TropicalCurve(adj_matrix(G)[vs, vs])
 		v1 = sum(f[1: edge[1]] .>= h)
 		v2 = sum(f[1: edge[2]] .>= h)
 		remove_edge!(subgraph, v1, v2)
@@ -442,7 +461,7 @@ function is_realizable(G::TropicalCurve, D::Divisor)
 		is_inconvenient(G, v, f) || continue
 		h = f[v]
 		vs = f .>= h
-		subgraph = TropicalCurve(G.adj_matrix[vs, vs])
+		subgraph = TropicalCurve(adj_matrix(G)[vs, vs])
 		v0 = sum(f[1: v] .>= h)
 		if !lies_on_cycle(subgraph, v0)
 			return false
@@ -458,13 +477,13 @@ function is_effective(D::Divisor)
 end
 
 # ╔═╡ 0f07e51e-dbee-4d49-a35c-103c8e9f7b58
-function get_legal_level_maps(G::TropicalCurve, D::Divisor, prefix::LevelMap;
+function get_legal_level_maps(G::AbstractCurve, D::Divisor, prefix::LevelMap;
 						reduced=false, 	# in practice D should always be reduced
 						restrict_support::Union{Subgraph, Nothing}=nothing)
 	# For this to work, we assume that the vertices of G are ordered so that
 	# v is connected to the subgraph supported on 1, ..., v-1 =: A
 	
-	n = size(G.adj_matrix, 1)
+	n = n_vertices(G)
 	
 	v = length(prefix) + 1
 	if v > n
@@ -480,14 +499,14 @@ function get_legal_level_maps(G::TropicalCurve, D::Divisor, prefix::LevelMap;
 	# Vertices in A that are disconnected from the complement of A
 	isolated_vertices = fill(true, v)
 	if v < n
-		isolated_vertices = vec(sum(G.adj_matrix[1:v, v+1:n], dims=2) .== 0)
+		isolated_vertices = vec(sum(adj_matrix(G)[1:v, v+1:n], dims=2) .== 0)
 	end
 
 	# In any case the slope of f is bounded by deg(D)
 	max_slope = sum(D)
 
 	# Heights of vertices adjacent to v in A
-	neighbour_levels = prefix[G.adj_matrix[1:v-1, v] .> 0]
+	neighbour_levels = prefix[adj_matrix(G)[1:v-1, v] .> 0]
 
 	# Bounds for f[v]
 	min_height = maximum(neighbour_levels) - max_slope
@@ -497,7 +516,7 @@ function get_legal_level_maps(G::TropicalCurve, D::Divisor, prefix::LevelMap;
 	# so we know on the complement of 1, ..., v-1 we won't exceed max_possible_height
 	max_possible_height = typemax(Int64)
 	if reduced
-		border_vertices = vec(sum(G.adj_matrix[1:v-1, v:n], dims=2) .> 0)
+		border_vertices = vec(sum(adj_matrix(G)[1:v-1, v:n], dims=2) .> 0)
 		max_possible_height = maximum(prefix[border_vertices])
 		max_height = min(max_possible_height, max_height)
 	end
@@ -511,7 +530,7 @@ function get_legal_level_maps(G::TropicalCurve, D::Divisor, prefix::LevelMap;
 	level_maps = []
 	
 	# E is the partial divisor obtained by restricting f to the subgraph A
-	fm = firing_matrix(G.adj_matrix[1:v, 1:v])
+	fm = firing_matrix(adj_matrix(G)[1:v, 1:v])
 	E = D[1:v] + fm * [prefix; min_height - 1]
 	# We calculate the increment on E resulting from putting f[v] one higher
 	# to avoid matrix multiplications
@@ -550,7 +569,7 @@ function get_legal_level_maps(G::TropicalCurve, D::Divisor, prefix::LevelMap;
 end
 
 # ╔═╡ 26dc12f2-0b46-4811-8796-59f231313083
-function get_linear_system(G::TropicalCurve, D::Divisor;
+function get_linear_system(G::AbstractCurve, D::Divisor;
 					restrict_support::Union{BitVector, Nothing}=nothing)::
 		Vector{Divisor}
 	# Returns a list of divisors on the given linear system
@@ -567,7 +586,7 @@ function get_linear_system(G::TropicalCurve, D::Divisor;
 	dists = vertex_dists(G, 1)
 	p = sortperm(dists)
 
-	Gperm = TropicalCurve(permute(G.adj_matrix, p, p))	
+	Gperm = TropicalCurve(permute(adj_matrix(G), p, p))	
 	res_supp_perm = isnothing(restrict_support) ?
 								nothing : restrict_support[p]
 
@@ -584,7 +603,7 @@ function get_linear_system(G::TropicalCurve, D::Divisor;
 end
 
 # ╔═╡ aca99b47-9e09-4bb8-9722-f44039d457c0
-function get_edge_list(G::TropicalCurve)::Vector{DirEdge}
+function get_edge_list(G::AbstractCurve)::Vector{DirEdge}
 	# Returns a list of directed edges, where the edges are all directed
 	# from smaller to bigger vertices
 	n = n_vertices(G)
@@ -630,12 +649,12 @@ function get_possible_slopes(E::AbstractVector{DirEdge}, D::Divisor)::
 end
 
 # ╔═╡ 8070f968-2f7c-4e6c-9592-b09027cc8e73
-function is_connected(G::TropicalCurve)::Bool
+function is_connected(G::AbstractCurve)::Bool
 	return all(vertex_dists(G, 1) .!= -1)
 end
 
 # ╔═╡ 2526ddb5-1442-457e-905a-ea4f0eae34e5
-function has_smooth_cut_set(G::TropicalCurve, slope_data::SlopeData)::Bool
+function has_smooth_cut_set(G::AbstractCurve, slope_data::SlopeData)::Bool
 	# Remove edges that have a chip on their interior and check if the result is connected
 	Gcopy = deepcopy(G)
 	for (edge, slopes) in slope_data
@@ -647,26 +666,23 @@ function has_smooth_cut_set(G::TropicalCurve, slope_data::SlopeData)::Bool
 end
 
 # ╔═╡ 1045209f-8e64-45e8-82da-570ac976dc9b
-function has_self_loops(G::TropicalCurve)::Bool
-	any(diag(G.adj_matrix) == 0)
+function has_self_loops(G::AbstractCurve)::Bool
+	any(diag(adj_matrix(G)) == 0)
 end
 
 # ╔═╡ 5afa3ff6-2927-4a1e-b7f8-a7aac5752733
-function represent_divisor(G::TropicalCurve, D::Divisor, slope_data::SlopeData)::
+function represent_divisor(G::AbstractCurve, D::Divisor, slope_data::SlopeData)::
 		Tuple{SubdividedCurve, Divisor}
 	n = n_vertices(G)
 	# We will need to subdivide the graph so that the resulting divisor is supported
 	# on vertices, so take the LCM of the needed subdivisions of all edges
 	factor = reduce(lcm,
-		map(slope -> max(-sum(slope), 1), values(slope_data)); 
+		map(slope -> sum(slope) == 0 ? 1 : denominator(slope[2]//sum(slope)), values(slope_data)); 
 		init=1)
-	# We multiply by a factor of 2 to ensure no points in the support of the divisor
-	# are adjacent
-	factor *= 2
 
 	# Now we need to add the chips on the right vertices according to the slopes
 	Gsub = subdivide_uniform(G, factor)
-	nsub = n_vertices(Gsub.curve)
+	nsub = n_vertices(Gsub)
 	Dsub = zeros(Int64, nsub)
 	Dsub[1:n] = D
 	for (edge, slopes) in slope_data
@@ -683,15 +699,15 @@ function represent_divisor(G::TropicalCurve, D::Divisor, slope_data::SlopeData):
 end
 
 # ╔═╡ 9d480c59-b627-4ca5-a5a6-48e6bb08c6c2
-function is_cover(G::TropicalCurve, A1::Subgraph, A2::Subgraph)::Bool
+function is_cover(G::AbstractCurve, A1::Subgraph, A2::Subgraph)::Bool
 	# Checks whether two subgraphs are a cover
 	# They need to cover all nodes and there should be no edges between points in
 	# A1 and A2 that are contained in neither of these subgraphs
-	all(A1 .| A2) && all(G.adj_matrix[A1 .& .!A2, A2 .& .!A1] .== 0)
+	all(A1 .| A2) && all(adj_matrix(G)[A1 .& .!A2, A2 .& .!A1] .== 0)
 end
 
 # ╔═╡ 5d7ee293-f0fe-470e-8998-7c2e5a504ee6
-function chipfire_comps(G::TropicalCurve, D::Divisor)::Vector{Subgraph}
+function chipfire_comps(G::AbstractCurve, D::Divisor)::Vector{Subgraph}
 	# Find all (closures of) connected components of G\supp D,
 	# This function assumes that G is subdivided enough so that
 	# there are no adjacent points in supp D
@@ -712,7 +728,7 @@ function chipfire_comps(G::TropicalCurve, D::Divisor)::Vector{Subgraph}
 		enqueue!(q, v)
 		while length(q) > 0
 			u = dequeue!(q)
-			(neighbors, val) = findnz(G.adj_matrix[:, u])
+			(neighbors, val) = findnz(adj_matrix(G)[:, u])
 			for nbh in neighbors[val .> 0]
 				if !visited[nbh]
 					visited[nbh] = true
@@ -731,33 +747,43 @@ function chipfire_comps(G::TropicalCurve, D::Divisor)::Vector{Subgraph}
 end
 
 # ╔═╡ 70c72ae6-ebaf-4c5f-a046-63e9ab6dcdcd
-function is_extremal(G::TropicalCurve, D::Divisor)::Bool
+function is_extremal(G::AbstractCurve, D::Divisor)::Bool
 	# This function checks whether D is extremal using Lemma 5 from [HMY09]
 	# i.e. it checks whether there are some two closed subgraphs that cover
 	# G and both can fire
-	n = n_vertices(G)
-	f = firing_matrix(G)
+	
+	# We subdivide G by a factor of 2 to ensure no points in the support of the divisor are adjacent
+	Gsub = subdivide_uniform(G, 2)
+	Dsub = zeros(Int64, n_vertices(Gsub))
+	Dsub[1:n_vertices(G)] = D
+
 	# Only combinations of (closures of) connected components of G can fire
-	comps = chipfire_comps(G, D)
+	comps = chipfire_comps(Gsub, Dsub)
+	
+	# interpret the number c as a BitVector and take the union of the corresponding components
+	empty_subgraph = Subgraph(fill(false, n_vertices(Gsub)))
+	subgraph(c) = reduce(.|, comps[BitVector(digits(c, base=2, pad=N))];
+					init=empty_subgraph)
+	
+	f = firing_matrix(Gsub)
 	N = length(comps)
 	m = 2^N - 1
 	# c1, c2 represent in binary a choice of sets in `comps`
 	for c1 = 0:m
-		# convert c1 to a BitVector and take the union of these sets
-		A1 = reduce(.|, comps[BitVector(digits(c1, base=2, pad=N))];
-					init=Subgraph(fill(false, n)))
+		A1 = subgraph(c1)
 		# A1 has to be a proper subset, so skip if A1 is the full graph
 		if all(A1)
 			continue
 		end
 		for c2 = 0:m
-			A2 = reduce(.|, comps[BitVector(digits(c2, base=2, pad=N))];
-						init=Subgraph(fill(false, n)))
+			A2 = subgraph(c2)
 			if all(A2)
 				continue
 			end
 			# Check whether the A_i cover G and can both fire
-			if is_cover(G, A1, A2) && is_effective(D + f*A1) && is_effective(D + f*A2)
+			if is_cover(Gsub, A1, A2) &&
+					is_effective(Dsub + f*A1) &&
+					is_effective(Dsub + f*A2)
 				return false
 			end
 		end
@@ -766,7 +792,7 @@ function is_extremal(G::TropicalCurve, D::Divisor)::Bool
 end
 
 # ╔═╡ 3fed3606-ece2-42b9-b83a-68190dd46b6f
-function get_extremals(G::TropicalCurve, D::Divisor)::
+function get_extremals(G::AbstractCurve, D::Divisor)::
 										Vector{Tuple{SubdividedCurve, Divisor}}
 	# Returns a list of extremals on a suitably subdivided curve
 	# Since extremals have no smooth cut set, the values of a rational function
@@ -789,30 +815,13 @@ function get_extremals(G::TropicalCurve, D::Divisor)::
 			# The returned curve is subdivided enough so that no two points of 
 			# the support of Dsub are adjacent
 			Gsub, Dsub = represent_divisor(G, divisor, slope_data)
-			if is_extremal(Gsub.curve, Dsub)
+			if is_extremal(Gsub, Dsub)
 				push!(extremals, (Gsub, Dsub))
 			end
 		end
 	end
 	return extremals
 end
-
-# ╔═╡ eb2181b7-6745-435e-a1c7-440bf6b998d4
-# ╠═╡ disabled = true
-#=╠═╡
-function get_edge_degs(G::SubdividedCurve, D::Divisor)
-	degs = Dict()
-	for v = n_vertices(G.original_curve) + 1:length(D)
-		supp = G.supporting_edge[v]
-		if haskey(degs, supp)
-			degs[supp] += D[v]
-		else
-			degs[supp] = D[v]
-		end
-	end
-	return degs
-end
-  ╠═╡ =#
 
 # ╔═╡ 74f9914d-1ed4-4b94-8222-74cac97eea1a
 begin
@@ -859,20 +868,20 @@ linsys = get_linear_system(G, canonical(G))
 length(linsys)
 
 # ╔═╡ 1ded8790-b02a-4dc7-8065-b698fae387d7
-min_support = vec(sum(Gsub.curve.adj_matrix, dims=1) .> 2)
+min_support = vec(get_valences(Gsub) .> 2)
 
 # ╔═╡ 8847e6a0-50de-4f4e-9ed0-881afe266418
-linsyssub = get_linear_system(Gsub.curve, canonical(Gsub.curve);
+linsyssub = get_linear_system(Gsub, canonical(Gsub);
 								restrict_support=nothing)
 
 # ╔═╡ 909f79dd-df94-4251-963f-d2f7a4659c39
 length(linsyssub)
 
 # ╔═╡ b5ec41be-19c2-4f04-b73d-5e11a765b72e
-function adjlist(G::TropicalCurve)
+function adjlist(G::AbstractCurve)
 	# Returns an adjacency list suitable for rendering with GraphRecipes
 	# Alternates directed edges between nodes
-	n = size(G.adj_matrix, 1)
+	n = n_vertices(G)
 	l = map(_ -> [], 1:n)
 	for i = 1:n, j = i:n
 		n_edges = n_edges_between(G, i, j)
@@ -886,19 +895,19 @@ end
 adjlist(G)
 
 # ╔═╡ 6bf0055a-26d6-4e59-96e7-88d4aa104983
-function plotcurve(G::TropicalCurve; 
+function plotcurve(G::AbstractCurve; 
 		labels::Vector=[],
 		nodesize=0.1,
 		curves=true,
 		color="white",
 		seed=1,
 		weights::Vector=[])
-	n = size(G.adj_matrix, 1)
+	n = n_vertices(G)
 	if isempty(labels)
 		labels = 1:n
 	end
 	if isempty(weights)
-		weights = labels .> 0
+		weights = labels
 	end
 	graphplot(adjlist(G);
 		names=labels != nothing ? labels : 1:n,
@@ -908,7 +917,7 @@ function plotcurve(G::TropicalCurve;
 		nodeshape=:circle,
 		curves=curves,
 		rng=Graphs.rng_from_rng_or_seed(nothing, seed),
-		curvature=((G.adj_matrix .> 1) .| spdiagm(0=>fill(1, n))) .* 0.05,
+		curvature=((adj_matrix(G) .> 1) .| spdiagm(0=>fill(1, n))) .* 0.05,
 		node_weights=weights,
 		nodesize=nodesize)
 end
@@ -923,7 +932,7 @@ plotcurve(G; labels=canonical(G), nodesize=0.2)
 plotcurve(G; labels=linsys[i], nodesize=0.2)
 
 # ╔═╡ fbf87769-b401-4082-a8c0-1775dd444978
-realizable_divs = map(D -> is_realizable(Gsub.curve, D), linsyssub)
+realizable_divs = map(D -> is_realizable(Gsub, D), linsyssub)
 
 # ╔═╡ 4c736d45-4234-4048-a704-ea9e97beed5a
 realizable_indices = (1:length(linsyssub))[realizable_divs]
@@ -935,7 +944,7 @@ nonrealizable_indices = (1:length(linsyssub))[.!realizable_divs]
 @bind j Slider(1:length(linsyssub))
 
 # ╔═╡ 0df36f16-4b8c-408b-8732-2af134f30b01
-plotcurve(Gsub.curve;
+plotcurve(Gsub;
 	labels=linsyssub[j], 
 	color=realizable_divs[j] ? "white" : "red",
 	nodesize=0.1)
@@ -945,7 +954,7 @@ plotcurve(Gsub.curve;
 
 # ╔═╡ bb5742f8-8e2e-4665-a5db-60b8d3a0cb2f
 # Plot only realizable divisors
-plotcurve(Gsub.curve;
+plotcurve(Gsub;
 	labels=linsyssub[realizable_indices[j1]], 
 	nodesize=0.1)
 
@@ -954,7 +963,7 @@ plotcurve(Gsub.curve;
 
 # ╔═╡ a06ecb0c-9b1b-41e4-874a-2e88493a38f4
 # Plot only non-realizable divisors
-plotcurve(Gsub.curve;
+plotcurve(Gsub;
 	labels=linsyssub[nonrealizable_indices[j2]], 
 	color="red",
 	nodesize=0.1)
@@ -964,7 +973,7 @@ simple = subdivide_simple(G)
 
 # ╔═╡ 49136ab0-1773-4d44-94e4-0832a4ab7d1b
 # Simple subdivision
-plotcurve(simple.curve; labels=canonical(simple.curve), nodesize=0.2)
+plotcurve(simple; labels=canonical(simple), nodesize=0.2)
 
 # ╔═╡ 892147af-cbc1-4600-8656-bb58c4fa3a37
 @bind k Slider(1:length(extremals))
@@ -972,105 +981,13 @@ plotcurve(simple.curve; labels=canonical(simple.curve), nodesize=0.2)
 # ╔═╡ c3286803-f241-45b1-91d2-f01387543290
 # Plot extremals
 begin
-	curve = extremals[k][1].curve
+	curve = extremals[k][1]
 	divisor = extremals[k][2]
 	realizable = is_realizable(curve, divisor)
 	plotcurve(curve; labels=divisor,
 		color=realizable ? "white" : "red",
-		nodesize=0.05)
+		nodesize=0.1)
 end
-
-# ╔═╡ 24e0d3ea-182b-425e-9ead-234c5598783a
-# ╠═╡ disabled = true
-# ╠═╡ skip_as_script = true
-#=╠═╡
-function get_legal_level_maps_iterative(G::TropicalCurve, D::Divisor;
-						reduced=false,
-						require_support::Union{BitVector, Nothing}=nothing)
-	# For this to work, we assume that the vertices of G are ordered so that
-	# v is connected to the subgraph supported on 1, ..., v-1 =: A
-	
-	n = size(G.adj_matrix, 1)
-
-	deg_D = sum(D)
-
-	legal_level_maps = []
-
-	# isolated_vertices[v] are the vertices in A = {1, ..., v} which are not
-	# connected to the rest
-	isolated_vertices = []
-	for v in 1:n-1
-		append!(isolated_vertices, [vec(sum(G.adj_matrix[1:v, v+1:n], dims=2) .== 0)])
-	end
-	append!(isolated_vertices, [fill(true, n)])
-
-	# Degree of D away from A
-	degaway = []
-	for v in 1:n-1
-		append!(degaway, [sum(D[v+1:n])])
-	end
-	append!(degaway, 0)
-	
-	f = fill(0, n)
-	min_height = fill(0, n)
-	max_height = fill(0, n)
-	v = 1
-
-	s = Stack{LevelMap}()
-	push!(s, [0])
-
-	while !isempty(s)
-		prefix = pop!(s)
-		
-		v = length(prefix) + 1
-		if v > n
-			if isnothing(require_support) ||
-					iszero((D + firing_matrix(G)*prefix)[.!require_support])
-				append!(legal_level_maps, [prefix])
-			end
-			continue
-		end
-		
-		# Heights of vertices adjacent to v in A
-		neighbour_levels = prefix[G.adj_matrix[1:v-1, v] .> 0]
-	
-		min_height = maximum(neighbour_levels) - deg_D
-		max_height = minimum(neighbour_levels) + deg_D
-		
-		# If D is reduced on the first vertex, f may only monotonically decrease
-		# going away from v1 (in the sense that the set f > c is always connected)
-		if reduced
-			border_vertices = .!isolated_vertices[v-1]
-			least_height_border = maximum(prefix[border_vertices])
-			max_height = min(least_height_border, max_height)
-		end
-	
-		fire = firing_matrix(G.adj_matrix[1:v, 1:v])
-		# E is the partial divisor obtained by restricting f to the subgraph A
-		E = D[1:v] + fire * [prefix; min_height - 1]
-		incr = Vector(fire[1:v, v])
-		for height = min_height : max_height
-			E += incr
-			# We can already detect cases when the restrictions on the support of the
-			# final vertex are satisifed to save time
-			is_correctly_supported = isnothing(require_support) ||
-				iszero(E[isolated_vertices[v] .& .!require_support[1:v]])
-			# The final level map may bring chips into the subgraph A from outside
-			# but at most `degaway` many, so the deficit to being effective cannot
-			# exceed this number
-			# Furthermore, if a vertex is inlocked inside A, it cannot receive more
-			# chips from the outside, so the divisor has the be effective there
-			if sum(E[E .< 0]) + degaway[v] >= 0 &&
-					is_effective(E[isolated_vertices[v]]) &&
-					is_correctly_supported
-				push!(s, [prefix; height])
-			end
-		end
-
-	end
-	return legal_level_maps
-end
-  ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1097,15 +1014,15 @@ PlutoUI = "~0.7.58"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.10.2"
+julia_version = "1.10.3"
 manifest_format = "2.0"
 project_hash = "3340faf920c620cc089cd76ad594283c82e51018"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
-git-tree-sha1 = "297b6b41b66ac7cbbebb4a740844310db9fd7b8c"
+git-tree-sha1 = "6e1d2a35f2f90a4bc7c2ed98079b2ba09c35b83a"
 uuid = "6e696c72-6542-2067-7265-42206c756150"
-version = "1.3.1"
+version = "1.3.2"
 
 [[deps.AbstractTrees]]
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
@@ -1150,17 +1067,16 @@ version = "1.0.1"
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 
-[[deps.BinDeps]]
-deps = ["Libdl", "Pkg", "SHA", "URIParser", "Unicode"]
-git-tree-sha1 = "1289b57e8cf019aede076edab0587eb9644175bd"
-uuid = "9e28174c-4ba2-5203-b857-d8d62c4213ee"
-version = "1.0.2"
+[[deps.BitFlags]]
+git-tree-sha1 = "2dc09997850d68179b69dafb58ae806167a32b1b"
+uuid = "d1d4a3ce-64b1-5f1a-9ba4-7e7e69966f35"
+version = "0.1.8"
 
 [[deps.Blink]]
-deps = ["Base64", "BinDeps", "Distributed", "JSExpr", "JSON", "Lazy", "Logging", "MacroTools", "Mustache", "Mux", "Reexport", "Sockets", "WebIO", "WebSockets"]
-git-tree-sha1 = "08d0b679fd7caa49e2bca9214b131289e19808c0"
+deps = ["Base64", "Distributed", "HTTP", "JSExpr", "JSON", "Lazy", "Logging", "MacroTools", "Mustache", "Mux", "Pkg", "Reexport", "Sockets", "WebIO"]
+git-tree-sha1 = "bc93511973d1f949d45b0ea17878e6cb0ad484a1"
 uuid = "ad839575-38b3-5650-b840-f874b8c74a25"
-version = "0.12.5"
+version = "0.12.9"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1184,11 +1100,17 @@ weakdeps = ["SparseArrays"]
     [deps.ChainRulesCore.extensions]
     ChainRulesCoreSparseArraysExt = "SparseArrays"
 
+[[deps.CodecZlib]]
+deps = ["TranscodingStreams", "Zlib_jll"]
+git-tree-sha1 = "59939d8a997469ee05c4b4944560a820f9ba0d73"
+uuid = "944b1d66-785c-5afd-91f1-9de20f533193"
+version = "0.7.4"
+
 [[deps.ColorSchemes]]
 deps = ["ColorTypes", "ColorVectorSpace", "Colors", "FixedPointNumbers", "PrecompileTools", "Random"]
-git-tree-sha1 = "67c1f244b991cad9b0aa4b7540fb758c2488b129"
+git-tree-sha1 = "4b270d6465eb21ae89b732182c20dc165f8bf9f2"
 uuid = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
-version = "3.24.0"
+version = "3.25.0"
 
 [[deps.ColorTypes]]
 deps = ["FixedPointNumbers", "Random"]
@@ -1210,15 +1132,15 @@ version = "0.10.0"
 
 [[deps.Colors]]
 deps = ["ColorTypes", "FixedPointNumbers", "Reexport"]
-git-tree-sha1 = "fc08e5930ee9a4e03f84bfb5211cb54e7769758a"
+git-tree-sha1 = "362a287c3aa50601b0bc359053d5c2468f0e7ce0"
 uuid = "5ae59095-9a9b-59fe-a467-6f913c188581"
-version = "0.12.10"
+version = "0.12.11"
 
 [[deps.Compat]]
 deps = ["TOML", "UUIDs"]
-git-tree-sha1 = "c955881e3c981181362ae4088b35995446298b80"
+git-tree-sha1 = "b1c55339b7c6c350ee89f2c1604299660525b248"
 uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
-version = "4.14.0"
+version = "4.15.0"
 weakdeps = ["Dates", "LinearAlgebra"]
 
     [deps.Compat.extensions]
@@ -1227,7 +1149,13 @@ weakdeps = ["Dates", "LinearAlgebra"]
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
-version = "1.1.0+0"
+version = "1.1.1+0"
+
+[[deps.ConcurrentUtilities]]
+deps = ["Serialization", "Sockets"]
+git-tree-sha1 = "6cbbd4d241d7e6579ab354737f4dd95ca43946e1"
+uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
+version = "2.4.1"
 
 [[deps.ConstructionBase]]
 deps = ["LinearAlgebra"]
@@ -1301,11 +1229,17 @@ git-tree-sha1 = "8e9441ee83492030ace98f9789a654a6d0b1f643"
 uuid = "2702e6a9-849d-5ed8-8c21-79e8b8f9ee43"
 version = "0.0.20230411+0"
 
+[[deps.ExceptionUnwrapping]]
+deps = ["Test"]
+git-tree-sha1 = "dcb08a0d93ec0b1cdc4af184b26b591e9695423a"
+uuid = "460bff9d-24e4-43bc-9d9f-a8973cb893f4"
+version = "0.1.10"
+
 [[deps.Expat_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "4558ab818dcceaab612d1bb8c19cee87eda2b83c"
+git-tree-sha1 = "1c6317308b9dc757616f0b5cb379db10494443a7"
 uuid = "2e619515-83b5-522b-bb60-26c02a35a201"
-version = "2.5.0+0"
+version = "2.6.2+0"
 
 [[deps.Extents]]
 git-tree-sha1 = "2140cd04483da90b2da7f99b2add0750504fc39c"
@@ -1329,15 +1263,15 @@ uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
 
 [[deps.FixedPointNumbers]]
 deps = ["Statistics"]
-git-tree-sha1 = "335bfdceacc84c5cdf16aadc768aa5ddfc5383cc"
+git-tree-sha1 = "05882d6995ae5c12bb5f36dd2ed3f61c98cbb172"
 uuid = "53c48c17-4a7d-5ca2-90c5-79b7896eea93"
-version = "0.8.4"
+version = "0.8.5"
 
 [[deps.Fontconfig_jll]]
-deps = ["Artifacts", "Bzip2_jll", "Expat_jll", "FreeType2_jll", "JLLWrappers", "Libdl", "Libuuid_jll", "Pkg", "Zlib_jll"]
-git-tree-sha1 = "21efd19106a55620a188615da6d3d06cd7f6ee03"
+deps = ["Artifacts", "Bzip2_jll", "Expat_jll", "FreeType2_jll", "JLLWrappers", "Libdl", "Libuuid_jll", "Zlib_jll"]
+git-tree-sha1 = "db16beca600632c95fc8aca29890d83788dd8b23"
 uuid = "a3f928ae-7b40-5064-980b-68af3947d34b"
-version = "2.13.93+0"
+version = "2.13.96+0"
 
 [[deps.Format]]
 git-tree-sha1 = "9c68794ef81b08086aeb32eeaf33531668d5f5fc"
@@ -1351,10 +1285,10 @@ uuid = "d7e528f0-a631-5988-bf34-fe36492bcfd7"
 version = "2.13.1+0"
 
 [[deps.FriBidi_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "aa31987c2ba8704e23c6c8ba8a4f769d5d7e4f91"
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "1ed150b39aebcc805c26b93a8d0122c940f64ce2"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
-version = "1.0.10+0"
+version = "1.0.14+0"
 
 [[deps.FunctionalCollections]]
 deps = ["Test"]
@@ -1369,16 +1303,16 @@ uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
 version = "3.3.9+0"
 
 [[deps.GR]]
-deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Preferences", "Printf", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "UUIDs", "p7zip_jll"]
-git-tree-sha1 = "3437ade7073682993e092ca570ad68a2aba26983"
+deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Preferences", "Printf", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "p7zip_jll"]
+git-tree-sha1 = "ddda044ca260ee324c5fc07edb6d7cf3f0b9c350"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
-version = "0.73.3"
+version = "0.73.5"
 
 [[deps.GR_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "FreeType2_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Qt6Base_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "a96d5c713e6aa28c242b0d25c1347e258d6541ab"
+git-tree-sha1 = "278e5e0f820178e8a26df3184fcb2280717c79b1"
 uuid = "d2c73de3-f751-5644-a686-071e5b155ba9"
-version = "0.73.3+0"
+version = "0.73.5+0"
 
 [[deps.GeoInterface]]
 deps = ["Extents"]
@@ -1388,9 +1322,9 @@ version = "1.3.4"
 
 [[deps.GeometryBasics]]
 deps = ["EarCut_jll", "Extents", "GeoInterface", "IterTools", "LinearAlgebra", "StaticArrays", "StructArrays", "Tables"]
-git-tree-sha1 = "5694b56ccf9d15addedc35e9a4ba9c317721b788"
+git-tree-sha1 = "b62f2b2d76cee0d61a2ef2b3118cd2a3215d3134"
 uuid = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
-version = "0.4.10"
+version = "0.4.11"
 
 [[deps.GeometryTypes]]
 deps = ["ColorTypes", "FixedPointNumbers", "LinearAlgebra", "StaticArrays"]
@@ -1406,9 +1340,9 @@ version = "0.21.0+0"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Zlib_jll"]
-git-tree-sha1 = "359a1ba2e320790ddbe4ee8b4d54a305c0ea2aff"
+git-tree-sha1 = "7c82e6a6cd34e9d935e9aa4051b66c6ff3af59ba"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
-version = "2.80.0+0"
+version = "2.80.2+0"
 
 [[deps.GraphRecipes]]
 deps = ["AbstractTrees", "GeometryTypes", "Graphs", "InteractiveUtils", "Interpolations", "LinearAlgebra", "NaNMath", "NetworkLayout", "PlotUtils", "RecipesBase", "SparseArrays", "Statistics"]
@@ -1434,10 +1368,10 @@ uuid = "42e2da0e-8278-4e71-bc24-59509adca0fe"
 version = "1.0.2"
 
 [[deps.HTTP]]
-deps = ["Base64", "Dates", "IniFile", "Logging", "MbedTLS", "NetworkOptions", "Sockets", "URIs"]
-git-tree-sha1 = "0fa77022fe4b511826b39c894c90daf5fce3334a"
+deps = ["Base64", "CodecZlib", "ConcurrentUtilities", "Dates", "ExceptionUnwrapping", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
+git-tree-sha1 = "d1d712be3164d61d1fb98e7ce9bcbc6cc06b45ed"
 uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-version = "0.9.17"
+version = "1.10.8"
 
 [[deps.HarfBuzz_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Pkg"]
@@ -1473,11 +1407,6 @@ version = "0.2.4"
 git-tree-sha1 = "ea8031dea4aff6bd41f1df8f2fdfb25b33626381"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
 version = "0.1.4"
-
-[[deps.IniFile]]
-git-tree-sha1 = "f550e6e32074c939295eb5ea6de31849ac2c9625"
-uuid = "83e8ac13-25f8-5344-8a64-a9f2b223428f"
-version = "0.5.1"
 
 [[deps.InteractiveUtils]]
 deps = ["Markdown"]
@@ -1530,9 +1459,9 @@ version = "0.21.4"
 
 [[deps.JpegTurbo_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "3336abae9a713d2210bb57ab484b1e065edd7d23"
+git-tree-sha1 = "c84a835e1a09b289ffcd2271bf2a337bbdda6637"
 uuid = "aacddb02-875f-59d6-b918-886e6ef4fbf8"
-version = "3.0.2+0"
+version = "3.0.3+0"
 
 [[deps.Kaleido_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1541,10 +1470,10 @@ uuid = "f7e6163d-2fa5-5f23-b69c-1db539e41963"
 version = "0.2.1+0"
 
 [[deps.LAME_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "f6250b16881adf048549549fba48b1161acdac8c"
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "170b660facf5df5de098d866564877e119141cbd"
 uuid = "c1c5ebd0-6772-5130-a774-d5fcae4a789d"
-version = "3.100.1+0"
+version = "3.100.2+0"
 
 [[deps.LERC_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1559,10 +1488,10 @@ uuid = "1d63c593-3942-5779-bab2-d838dc0a180e"
 version = "15.0.7+0"
 
 [[deps.LZO_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "e5b909bcf985c5e2605737d2ce278ed791b89be6"
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "70c5da094887fd2cae843b8db33920bac4b6f07d"
 uuid = "dd4b983a-f0e5-5f8d-a1b7-129d4a5fb1ac"
-version = "2.10.1+0"
+version = "2.10.2+0"
 
 [[deps.LaTeXStrings]]
 git-tree-sha1 = "50901ebc375ed41dbf8058da26f9de442febbbec"
@@ -1623,10 +1552,10 @@ uuid = "e9f186c6-92d2-5b65-8a66-fee21dc1b490"
 version = "3.2.2+1"
 
 [[deps.Libgcrypt_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Libgpg_error_jll", "Pkg"]
-git-tree-sha1 = "64613c82a59c120435c067c2b809fc61cf5166ae"
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Libgpg_error_jll"]
+git-tree-sha1 = "9fd170c4bbfd8b935fdc5f8b7aa33532c991a673"
 uuid = "d4300ac3-e22c-5743-9152-c294e39db1e4"
-version = "1.8.7+0"
+version = "1.8.11+0"
 
 [[deps.Libglvnd_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "Xorg_libX11_jll", "Xorg_libXext_jll"]
@@ -1635,10 +1564,10 @@ uuid = "7e76a0d4-f3c7-5321-8279-8d96eeed0f29"
 version = "1.6.0+0"
 
 [[deps.Libgpg_error_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "c333716e46366857753e273ce6a69ee0945a6db9"
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "fbb1f2bef882392312feb1ede3615ddc1e9b99ed"
 uuid = "7add5ba3-2f88-524e-9cd5-f83b8a55f7b8"
-version = "1.42.0+0"
+version = "1.49.0+0"
 
 [[deps.Libiconv_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1648,9 +1577,9 @@ version = "1.17.0+0"
 
 [[deps.Libmount_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "dae976433497a2f841baadea93d27e68f1a12a97"
+git-tree-sha1 = "0c4f9c4f1a50d8f35048fa0532dabbadf702f81e"
 uuid = "4b2f31a3-9ecc-558c-b454-b3730dcb73e9"
-version = "2.39.3+0"
+version = "2.40.1+0"
 
 [[deps.Libtiff_jll]]
 deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "LERC_jll", "Libdl", "XZ_jll", "Zlib_jll", "Zstd_jll"]
@@ -1660,9 +1589,9 @@ version = "4.5.1+1"
 
 [[deps.Libuuid_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "0a04a1318df1bf510beb2562cf90fb0c386f58c4"
+git-tree-sha1 = "5ee6203157c120d79034c748a2acba45b82b8807"
 uuid = "38a345b3-de98-5d2b-a5d3-14cd9215e700"
-version = "2.39.3+1"
+version = "2.40.1+0"
 
 [[deps.LinearAlgebra]]
 deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
@@ -1686,6 +1615,12 @@ version = "0.3.27"
 
 [[deps.Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
+
+[[deps.LoggingExtras]]
+deps = ["Dates", "Logging"]
+git-tree-sha1 = "c1dd6d7978c12545b4179fb6153b9250c96b0075"
+uuid = "e6f89c97-d47a-5376-807f-9c37f3926c36"
+version = "1.0.3"
 
 [[deps.MIMEs]]
 git-tree-sha1 = "65f28ad4b594aebe22157d6fac869786a255b7eb"
@@ -1738,10 +1673,10 @@ uuid = "ffc61752-8dc7-55ee-8c37-f3e9cdd09e70"
 version = "1.0.19"
 
 [[deps.Mux]]
-deps = ["AssetRegistry", "Base64", "HTTP", "Hiccup", "Pkg", "Sockets", "WebSockets"]
-git-tree-sha1 = "82dfb2cead9895e10ee1b0ca37a01088456c4364"
+deps = ["AssetRegistry", "Base64", "HTTP", "Hiccup", "MbedTLS", "Pkg", "Sockets"]
+git-tree-sha1 = "7295d849103ac4fcbe3b2e439f229c5cc77b9b69"
 uuid = "a975b10e-0019-58db-a62f-e48ff68538c9"
-version = "0.7.6"
+version = "1.0.2"
 
 [[deps.NaNMath]]
 deps = ["OpenLibm_jll"]
@@ -1793,6 +1728,12 @@ deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
 version = "0.8.1+2"
 
+[[deps.OpenSSL]]
+deps = ["BitFlags", "Dates", "MozillaCACerts_jll", "OpenSSL_jll", "Sockets"]
+git-tree-sha1 = "38cb508d080d21dc1128f7fb04f20387ed4c0af4"
+uuid = "4d8831e6-92b7-49fb-bdf8-b643e874388c"
+version = "1.4.3"
+
 [[deps.OpenSSL_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "3da7367955dcc5c54c1ba4d402ccdc09a1a3e046"
@@ -1840,9 +1781,9 @@ version = "1.3.0"
 
 [[deps.Pixman_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "LLVMOpenMP_jll", "Libdl"]
-git-tree-sha1 = "64779bc4c9784fee475689a1752ef4d5747c5e87"
+git-tree-sha1 = "35621f10a7531bc8fa58f74610b1bfb70a3cfc6b"
 uuid = "30392449-352a-5448-841d-b1acce4e97dc"
-version = "0.42.2+0"
+version = "0.43.4+0"
 
 [[deps.Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "FileWatching", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
@@ -1913,9 +1854,9 @@ version = "1.40.4"
 
 [[deps.PlutoUI]]
 deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
-git-tree-sha1 = "71a22244e352aa8c5f0f2adde4150f62368a3f2e"
+git-tree-sha1 = "ab55ee1510ad2af0ff674dbcced5e94921f867a9"
 uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
-version = "0.7.58"
+version = "0.7.59"
 
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
@@ -2008,6 +1949,11 @@ deps = ["Dates", "Grisu"]
 git-tree-sha1 = "91eddf657aca81df9ae6ceb20b959ae5653ad1de"
 uuid = "992d4aef-0814-514b-bc4d-f2e9a6c4116f"
 version = "1.0.3"
+
+[[deps.SimpleBufferStream]]
+git-tree-sha1 = "874e8867b33a00e784c8a7e4b60afe9e037b74e1"
+uuid = "777ac1f9-54b0-4bf8-805c-2214025038e7"
+version = "1.1.0"
 
 [[deps.SimpleTraits]]
 deps = ["InteractiveUtils", "MacroTools"]
@@ -2117,16 +2063,19 @@ version = "0.1.1"
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
+[[deps.TranscodingStreams]]
+git-tree-sha1 = "5d54d076465da49d6746c647022f3b3674e64156"
+uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
+version = "0.10.8"
+weakdeps = ["Random", "Test"]
+
+    [deps.TranscodingStreams.extensions]
+    TestExt = ["Test", "Random"]
+
 [[deps.Tricks]]
 git-tree-sha1 = "eae1bb484cd63b36999ee58be2de6c178105112f"
 uuid = "410a4b4d-49e4-4fbc-ab6d-cb71b17b3775"
 version = "0.1.8"
-
-[[deps.URIParser]]
-deps = ["Unicode"]
-git-tree-sha1 = "53a9f49546b8d2dd2e688d216421d050c9a31d0d"
-uuid = "30578b45-9adc-5946-b283-645ec420af67"
-version = "0.4.1"
 
 [[deps.URIs]]
 git-tree-sha1 = "67db6cc7b3821e19ebe75791a9dd19c9b1188f2b"
@@ -2153,9 +2102,9 @@ version = "0.4.1"
 
 [[deps.Unitful]]
 deps = ["Dates", "LinearAlgebra", "Random"]
-git-tree-sha1 = "3c793be6df9dd77a0cf49d80984ef9ff996948fa"
+git-tree-sha1 = "352edac1ad17e018186881b051960bfca78a075a"
 uuid = "1986cc42-f94f-5a68-af5c-568840ba703d"
-version = "1.19.0"
+version = "1.19.1"
 
     [deps.Unitful.extensions]
     ConstructionBaseUnitfulExt = "ConstructionBase"
@@ -2202,9 +2151,9 @@ version = "0.8.21"
 
 [[deps.WebSockets]]
 deps = ["Base64", "Dates", "HTTP", "Logging", "Sockets"]
-git-tree-sha1 = "f91a602e25fe6b89afc93cf02a4ae18ee9384ce3"
+git-tree-sha1 = "4162e95e05e79922e44b9952ccbc262832e4ad07"
 uuid = "104b5d7c-a370-577a-8038-80a2059c5097"
-version = "1.5.9"
+version = "1.6.0"
 
 [[deps.Widgets]]
 deps = ["Colors", "Dates", "Observables", "OrderedCollections"]
@@ -2237,16 +2186,16 @@ uuid = "ffd25f8a-64ca-5728-b0f7-c24cf3aae800"
 version = "5.4.6+0"
 
 [[deps.Xorg_libICE_jll]]
-deps = ["Libdl", "Pkg"]
-git-tree-sha1 = "e5becd4411063bdcac16be8b66fc2f9f6f1e8fe5"
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "326b4fea307b0b39892b3e85fa451692eda8d46c"
 uuid = "f67eecfb-183a-506d-b269-f58e52b52d7c"
-version = "1.0.10+1"
+version = "1.1.1+0"
 
 [[deps.Xorg_libSM_jll]]
-deps = ["Libdl", "Pkg", "Xorg_libICE_jll"]
-git-tree-sha1 = "4a9d9e4c180e1e8119b5ffc224a7b59d3a7f7e18"
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libICE_jll"]
+git-tree-sha1 = "3796722887072218eabafb494a13c963209754ce"
 uuid = "c834827a-8449-5923-a945-d239c165b7dd"
-version = "1.2.3+0"
+version = "1.2.4+0"
 
 [[deps.Xorg_libX11_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libxcb_jll", "Xorg_xtrans_jll"]
@@ -2273,10 +2222,10 @@ uuid = "a3789734-cfe1-5b06-b2d0-1dd0d9d62d05"
 version = "1.1.4+0"
 
 [[deps.Xorg_libXext_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "Xorg_libX11_jll"]
-git-tree-sha1 = "b7c0aa8c376b31e4852b360222848637f481f8c3"
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libX11_jll"]
+git-tree-sha1 = "d2d1a5c49fae4ba39983f63de6afcbea47194e85"
 uuid = "1082639a-0dae-5f34-9b06-72781eeb8cb3"
-version = "1.3.4+4"
+version = "1.3.6+0"
 
 [[deps.Xorg_libXfixes_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "Xorg_libX11_jll"]
@@ -2303,10 +2252,10 @@ uuid = "ec84b674-ba8e-5d96-8ba1-2a689ba10484"
 version = "1.5.2+4"
 
 [[deps.Xorg_libXrender_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "Xorg_libX11_jll"]
-git-tree-sha1 = "19560f30fd49f4d4efbe7002a1037f8c43d43b96"
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libX11_jll"]
+git-tree-sha1 = "47e45cd78224c53109495b3e324df0c37bb61fbe"
 uuid = "ea2f1a96-1ddc-540d-b46f-429655e07cfa"
-version = "0.9.10+4"
+version = "0.9.11+0"
 
 [[deps.Xorg_libpthread_stubs_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -2494,8 +2443,10 @@ version = "1.4.1+1"
 # ╔═╡ Cell order:
 # ╠═5b6ee372-4155-4b7f-967f-f399fadf224f
 # ╠═da3f8c95-d1ab-4763-a247-1e4ad41971dc
+# ╠═eb18d648-1e05-4e22-ae9b-8e5c7387c360
 # ╠═b27f2982-568f-4ccf-8678-da0a9a5545c2
 # ╠═4646aec5-4b8d-440f-aca0-50aaac01d966
+# ╠═13478274-4dcf-4763-b826-fc339f758d9c
 # ╠═fbbc5547-47f2-4a2a-99e8-e1e1e0f285c0
 # ╠═ce56d3ea-55fd-4f43-b4f7-37285069a7bc
 # ╠═48c2b423-e2d0-42a5-b608-d6aaf7c774ea
@@ -2508,6 +2459,7 @@ version = "1.4.1+1"
 # ╠═ed442fb5-16fc-4827-81b5-b13f8e64230b
 # ╠═3cff152b-3946-4eac-a231-7e795884718c
 # ╠═4ff161cb-db71-443b-8816-beefa44d5a1b
+# ╠═50de02d3-5aff-4fad-9f01-ffe186f14b08
 # ╠═0f2c3b22-1886-4078-be5d-8931a6ffdba0
 # ╠═723f4022-b05a-46b2-9f6d-7e2e13bff363
 # ╠═cdf55264-b7c4-417b-8a25-364e1d1f9ed0
@@ -2515,6 +2467,7 @@ version = "1.4.1+1"
 # ╠═31ee27fc-be3f-41d3-a972-2b1d3314dfd3
 # ╠═efdc84d0-ff99-49c7-959c-cd2a8d3337c6
 # ╠═f695a6b7-e1dc-4f8b-80ac-88acf356ad13
+# ╠═f0f66a4f-7b3d-485a-a0c3-5a726a075d5b
 # ╠═f4bb5b5c-1087-4c73-be81-985bc6e16735
 # ╠═053aeb23-3211-4b44-b7bc-94da28b5ad8c
 # ╠═13a53ea3-9b81-430f-8f70-54011e3552ba
@@ -2538,7 +2491,6 @@ version = "1.4.1+1"
 # ╠═5d7ee293-f0fe-470e-8998-7c2e5a504ee6
 # ╠═70c72ae6-ebaf-4c5f-a046-63e9ab6dcdcd
 # ╠═3fed3606-ece2-42b9-b83a-68190dd46b6f
-# ╠═eb2181b7-6745-435e-a1c7-440bf6b998d4
 # ╠═74f9914d-1ed4-4b94-8222-74cac97eea1a
 # ╠═7bfdfd4d-0528-45a7-8e32-3786dea43490
 # ╠═da542061-f041-49ce-8011-805e5bf5ae57
@@ -2573,6 +2525,5 @@ version = "1.4.1+1"
 # ╠═49136ab0-1773-4d44-94e4-0832a4ab7d1b
 # ╠═892147af-cbc1-4600-8656-bb58c4fa3a37
 # ╠═c3286803-f241-45b1-91d2-f01387543290
-# ╠═24e0d3ea-182b-425e-9ead-234c5598783a
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

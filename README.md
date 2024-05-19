@@ -1,4 +1,4 @@
-# Exploration of Lineary Systems on Graphs
+# Exploration of Linear Systems on Graphs
 
 This notebook contains my experimentation with linear systems on graphs.
 The file is readable/runnable as is, but to see the code in action it is
