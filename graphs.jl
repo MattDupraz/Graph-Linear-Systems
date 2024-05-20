@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.41
+# v0.19.42
 
 using Markdown
 using InteractiveUtils
@@ -38,7 +38,7 @@ end
 # ╔═╡ afe9c622-0201-46d2-9fb5-c4600b87ef1a
 md"""
 # Tropical Curves
-In this context a tropical curve is represented as a finite graph. Since all such curves arising from the tropicalization process have integral edge lengths, it is reasonable to assume that all edges have length 1. This will allow us to treat chip-firing operations more easily and represent rational maps simply using the values on the vertices (here we will call this a level map).
+In this context a tropical curve is represented as a finite graph. Since all such curves arising from the tropicalization process have integral edge lengths, it is reasonable to assume that all edges have length 1 (we can take the tropicalization of the minimal regular model). This will allow us to treat chip-firing operations more easily and represent rational maps simply using the values on the vertices (here we will call this a level map).
 """
 
 # ╔═╡ eb18d648-1e05-4e22-ae9b-8e5c7387c360
@@ -46,27 +46,27 @@ In this context a tropical curve is represented as a finite graph. Since all suc
 abstract type AbstractCurve end
 
 # ╔═╡ b27f2982-568f-4ccf-8678-da0a9a5545c2
-Vertex = Int64
+Vertex = Int
 
 # ╔═╡ 4646aec5-4b8d-440f-aca0-50aaac01d966
 # A tropical curve is represented by a finite graph with possible loops and parallel
 # edges. The edges are all considered to be of length 1
 mutable struct TropicalCurve <: AbstractCurve
 	# The adjacency matrix stores the number of edges between two vertices (counted twice for self-edges)
-	adj_matrix::SparseMatrixCSC{Int64, Vertex}
-	function TropicalCurve(n::Int64)
+	adj_matrix::SparseMatrixCSC{Int, Vertex}
+	function TropicalCurve(n::Int)
 		if n < 1
 			error("Need at least one node")
 		end
 		new(spzeros(n, n))
 	end
-	function TropicalCurve(m::SparseMatrixCSC{Int64, Vertex})
+	function TropicalCurve(m::SparseMatrixCSC{Int, Vertex})
 		new(m)
 	end
 end
 
 # ╔═╡ 13478274-4dcf-4763-b826-fc339f758d9c
-function adj_matrix(G::TropicalCurve)::AbstractMatrix{Int64}
+function adj_matrix(G::TropicalCurve)::AbstractMatrix{Int}
 	return G.adj_matrix
 end
 
@@ -98,13 +98,13 @@ end
 Subgraph = BitVector
 
 # ╔═╡ fbbc5547-47f2-4a2a-99e8-e1e1e0f285c0
-Divisor = AbstractVector{Int64}
+Divisor = AbstractVector{Int}
 
 # ╔═╡ ce56d3ea-55fd-4f43-b4f7-37285069a7bc
-LevelMap = AbstractVector{Int64}
+LevelMap = AbstractVector{Int}
 
 # ╔═╡ 10e8fdd1-5f33-4e3e-b448-acd3f0c5950d
-function firing_matrix(adj::AbstractMatrix{Int64})
+function firing_matrix(adj::AbstractMatrix{Int})
 	# The firing matrix is the matrix F such that
 	# F*[f] = [div(f)]
 	valences = sum(adj, dims=1)
@@ -116,7 +116,7 @@ end
 struct DirEdge
 	v1::Vertex
 	v2::Vertex
-	i::Int64 # index of edge, there may be multiple edges between two vertices
+	i::Int # index of edge, there may be multiple edges between two vertices
 end
 
 # ╔═╡ efdc84d0-ff99-49c7-959c-cd2a8d3337c6
@@ -125,7 +125,7 @@ end
 struct Edge
 	v1::Vertex
 	v2::Vertex
-	i::Int64
+	i::Int
 	function Edge(v1, v2, i)
 		new(min(v1, v2), max(v1, v2), i)
 	end
@@ -148,8 +148,11 @@ mutable struct SubdividedCurve <: AbstractCurve
 	original_curve::TropicalCurve
 	added_vertices::Dict{Edge, Vector{Vertex}}
 	supporting_edge::Dict{Vertex, Edge}
+	is_uniform::Bool
+	factor::Int
 	function SubdividedCurve(G::TropicalCurve)
-		new(deepcopy(G), G, Dict{Edge, Vector{Vertex}}(), Dict{Vertex, Edge}())
+		new(deepcopy(G), G, Dict{Edge, Vector{Vertex}}(), Dict{Vertex, Edge}(),
+			true, 1)
 	end
 	function SubdividedCurve(G::SubdividedCurve)
 		deepcopy(G)
@@ -172,7 +175,7 @@ function firing_matrix(G::AbstractCurve)
 end
 
 # ╔═╡ ed442fb5-16fc-4827-81b5-b13f8e64230b
-function vertex_dists(G::AbstractCurve, v::Vertex)::Vector{Int64}
+function vertex_dists(G::AbstractCurve, v::Vertex)::Vector{Int}
 	# Returns a vector containing the distances of each vertex from the given
 	# vertex v.
 	n = n_vertices(G)
@@ -242,7 +245,7 @@ function reduce_divisor(G::AbstractCurve, D::Divisor, v::Vertex)::
 		currdist -= 1
 	end
 
-	level_map = zeros(Int64, n)
+	level_map = zeros(Int, n)
 	# perform Dhar's burning algorithm
 	while true
 		burned = dhar_algo(G, currdiv, v)
@@ -271,7 +274,7 @@ function get_level_map(G::AbstractCurve, ref::Divisor, D::Divisor)::LevelMap
 end
 
 # ╔═╡ 50de02d3-5aff-4fad-9f01-ffe186f14b08
-function get_valences(G::AbstractCurve)::Vector{Int64}
+function get_valences(G::AbstractCurve)::Vector{Int}
 	return vec(sum(adj_matrix(G), dims=1))
 end
 
@@ -329,6 +332,8 @@ function subdivide_edge!(G::SubdividedCurve, e::Edge, f)
 		v_to = (l == f ? e.v2 : n + l)
 		add_edge!(G.curve, v_from, v_to)
 	end
+
+	G.is_uniform = false
 end
 
 # ╔═╡ 053aeb23-3211-4b44-b7bc-94da28b5ad8c
@@ -360,12 +365,17 @@ function subdivide_uniform(G::AbstractCurve, f)::SubdividedCurve
 	n = n_vertices(G)
 
 	Gsub = SubdividedCurve(G)
+	was_uniform = Gsub.is_uniform
 	for i in 1:n
 		for j in i:n
 			for k in 1:n_edges_between(G, i, j)
 				subdivide_edge!(Gsub, Edge(i, j, k), f)
 			end
 		end
+	end
+	if was_uniform
+		Gsub.is_uniform = true
+		Gsub.factor *= f
 	end
 	return Gsub
 end
@@ -378,7 +388,7 @@ function edges_from(G::AbstractCurve, v::Vertex)::Vector{DirEdge}
 end
 
 # ╔═╡ fcb4e5b8-2fc0-450d-989c-0d7731186534
-function outgoing_slopes(G::AbstractCurve, v::Vertex, f::LevelMap)::Vector{Int64}
+function outgoing_slopes(G::AbstractCurve, v::Vertex, f::LevelMap)::Vector{Int}
 	# Returns a vector of outgoing slopes at v, appearing with multiplicity
 	map(edge -> f[edge.v2] - f[edge.v1], edges_from(G, v))
 end
@@ -522,7 +532,7 @@ function get_legal_level_maps(G::AbstractCurve, D::Divisor, prefix::LevelMap;
 	# If D is reduced on the first vertex, f may only monotonically decrease
 	# going away from v1 (in the sense that the set f > c is always connected)
 	# so we know on the complement of 1, ..., v-1 we won't exceed max_possible_height
-	max_possible_height = typemax(Int64)
+	max_possible_height = typemax(Int)
 	if reduced
 		border_vertices = vec(sum(adj_matrix(G)[1:v-1, v:n], dims=2) .> 0)
 		max_possible_height = maximum(prefix[border_vertices])
@@ -611,22 +621,21 @@ function get_linear_system(G::AbstractCurve, D::Divisor;
 end
 
 # ╔═╡ aca99b47-9e09-4bb8-9722-f44039d457c0
-function get_edge_list(G::AbstractCurve)::Vector{DirEdge}
-	# Returns a list of directed edges, where the edges are all directed
-	# from smaller to bigger vertices
+function get_edge_list(G::AbstractCurve)::Vector{Edge}
+	# Returns a list of undirected edges in the grpah
 	n = n_vertices(G)
-	edge_list = Vector{DirEdge}(undef, 0)
+	edge_list = Vector{Edge}(undef, 0)
 	for u = 1:n, v = u:n, i = 1:n_edges_between(G, u, v)
-		push!(edge_list, DirEdge(u, v, i))
+		push!(edge_list, Edge(u, v, i))
 	end
 	return edge_list
 end
 
 # ╔═╡ 57e98040-f315-42b0-be1e-8904bb6087f0
-SlopeData = Dict{DirEdge, Tuple{Int64, Int64}}
+SlopeData = Dict{Edge, Tuple{Int, Int}}
 
 # ╔═╡ ba997d28-f684-4815-89ca-241964958177
-function get_possible_slopes(E::AbstractVector{DirEdge}, D::Divisor)::
+function get_possible_slopes(E::AbstractVector{Edge}, D::Divisor)::
 		Vector{SlopeData}
 	# Returns a vector of slope configurations that can fire given divisor D
 	if isempty(E)
@@ -691,11 +700,11 @@ function represent_divisor(G::AbstractCurve, D::Divisor, slope_data::SlopeData):
 	# Now we need to add the chips on the right vertices according to the slopes
 	Gsub = subdivide_uniform(G, factor)
 	nsub = n_vertices(Gsub)
-	Dsub = zeros(Int64, nsub)
+	Dsub = zeros(Int, nsub)
 	Dsub[1:n] = D
 	for (edge, slopes) in slope_data
 		if slopes != (0, 0)
-			vs = Gsub.added_vertices[Edge(edge)]
+			vs = Gsub.added_vertices[edge]
 			v = vs[div(slopes[2] * factor, sum(slopes))]
 			Dsub[v] += -sum(slopes)
 			# Slopes are negative, so this subtracts the chips from the vertices
@@ -762,7 +771,7 @@ function is_extremal(G::AbstractCurve, D::Divisor)::Bool
 	
 	# We subdivide G by a factor of 2 to ensure no points in the support of the divisor are adjacent
 	Gsub = subdivide_uniform(G, 2)
-	Dsub = zeros(Int64, n_vertices(Gsub))
+	Dsub = zeros(Int, n_vertices(Gsub))
 	Dsub[1:n_vertices(G)] = D
 
 	# Only combinations of (closures of) connected components of G can fire
@@ -916,8 +925,8 @@ function adjlist(G::AbstractCurve)
 	l = map(_ -> [], 1:n)
 	for i = 1:n, j = i:n
 		n_edges = n_edges_between(G, i, j)
-		append!(l[i], fill(j, floor(Int64, n_edges/2)))
-		append!(l[j], fill(i, ceil(Int64, n_edges/2)))
+		append!(l[i], fill(j, floor(Int, n_edges/2)))
+		append!(l[j], fill(i, ceil(Int, n_edges/2)))
 	end
 	return l
 end
@@ -1063,51 +1072,74 @@ md"""
 
 We will now define types to represent rational functions and divisors. These will allow us to work with the tropical module structure without having to worry about curve subdivisions. For this, we will specify divisors and rational functions on the vertices AND on the interior of edges, by giving the corresponding data as a list of values and distances along an edge.
 
+We will not have to worry about floating point precision, as we will use the Rational type, which is exact
+
 We will still suppose the edges are all of length 1.
 """
+
+# ╔═╡ 62dcb648-0f71-48a1-b787-cf640b0fe3e4
+QQ = Rational{Int}
 
 # ╔═╡ 0ab8b971-4ba8-49d5-9ce0-903c38e8a140
 struct EdgePoint
 	edge::Edge
-	dist::Rational{Int64}
+	pos::QQ
 end
 
+# ╔═╡ 550d1862-645d-4e90-9f87-651e823b12c5
+struct EdgeVal{T<:Number}
+	pos::QQ
+	val::T
+end
+
+# ╔═╡ 9a3a3bd9-fcb5-4ce0-a08c-9b3c58f1b3b3
+Base.show(io::IO, v::EdgeVal{T}) where T = show(io, (v.pos, v.val))
+
+# ╔═╡ e2f9c63f-4bf0-4421-942f-00a36c7538ad
+EdgeData{T} = Vector{EdgeVal{T}} where T<:Number
+
+# ╔═╡ 7b92bf44-5cc7-4085-859c-bb05d8f48b43
+Base.show(io::IO, v::EdgeData{T}) where T = print(io, "[", join(v, ", "), "]")
+
 # ╔═╡ dadd0869-439d-45ed-9ae6-e50042026e17
-struct RationalData{T}
+mutable struct RationalData{T<:Number}
 	vertex_vals::Vector{T} # Values on vertices
-	edge_vals::Dict{Edge, Vector{Tuple{Rational{Int64}, T}}} # values on edges
-	function RationalData(G::AbstractCurve)
-		new{T}(Vector{T}(undef, n_vertices(G)), Dict())
+	edge_vals::Dict{Edge, EdgeData{T}} # values on edges
+	function RationalData{T}(G::TropicalCurve, vals::Vector{T}) where T
+		new{T}(vals, Dict(map(e -> (e => []), get_edge_list(G))))
+	end
+	function RationalData{T}(G::TropicalCurve) where T
+		RationalData{T}(G, Vector{T}(undef, n_vertices(G)))
 	end
 end
 
 # ╔═╡ 1dffc2d6-c1bc-4471-adad-60d30b40eb5f
-function set_edge_val!(data::RationalData{T}, p::EdgePoint, val::T) where {T}
+function set_edge_val!(data::RationalData{T}, p::EdgePoint, val::T) where T
 	vals = get!(data.edge_vals, p.edge, [])
 	j = 1
 	for i = 1:length(vals)
-		if vals[i][1] > p.dist
+		if vals[i].pos > p.pos
 			break
 		end
 		j = i
 	end
-	insert!(vals, j, (p.dist, val))
+	insert!(vals, j, EdgeVal(p.pos, val))
 end
 
 # ╔═╡ 4e1ca42f-5596-42d5-bcc7-5dcf31966549
-function vals_along_edge(data::RationalData{T}, e::Edge)::Vector{Tuple{Rational, T}} where {T}
-	fst = (0//1, data.vertex_vals[e.v1])
-	lst = (1//1, data.vertex_vals[e.v2])
-	return [[fst]; mults; [lst]]
+function vals_along_edge(data::RationalData{T}, e::Edge)::EdgeData{T} where T
+	fst = EdgeVal(0//1, data.vertex_vals[e.v1])
+	lst = EdgeVal(1//1, data.vertex_vals[e.v2])
+	return [[fst]; data.edge_vals[e]; [lst]]
 end
 
 # ╔═╡ aaa7ad81-3bc2-4d1e-9d1b-46c4e4388655
-function vals_along_edge(data::RationalData{T}, e::DirEdge)::Vector{Tuple{Rational, T}} where {T}
+function vals_along_edge(data::RationalData{T}, e::DirEdge)::EdgeData{T} where T
 	edge = Edge(e)
-	vals = vals_along_edge(edge)
+	vals = vals_along_edge(data, edge)
 	is_reversed = e != get_dir_edge(edge)
 	if is_reversed
-		vals = map(t -> (1//1 - t[1], t[2]), reverse(vals))
+		vals = map(t -> EdgeVal(1//1 - t.pos, t.val), reverse(vals))
 	end
 	return vals
 end
@@ -1119,28 +1151,32 @@ RationalPoint = Union{Vertex, EdgePoint}
 function get_edge_points(data::RationalData)::Vector{EdgePoint}
 	edgepoints = []
 	for (edge, vals) in data.edge_vals
-		append!(edgepoints, map(t -> EdgePoint(edge, t[1]), vals))
+		append!(edgepoints, map(t -> EdgePoint(edge, t.pos), vals))
 	end
 	return edgepoints
 end
 
 # ╔═╡ 4c9420f2-a20f-4633-a814-44f3bfd87661
-RationalDivisor = RationalData{Int64}
+RationalDivisor = RationalData{Int}
 
 # ╔═╡ 88215e30-2edc-456b-b13d-fb444a5d38d0
-RationalFunction = RationalData{Rational{Int64}}
+RationalFunction = RationalData{QQ}
 
 # ╔═╡ 05b2a789-3bc6-4161-be55-4e560fb590be
-function get_slope(t1::Tuple{Rational, Rational}, t2::Tuple{Rational, Rational})
-	return (t2[2] - t1[2])/abs(t2[1] - t1[1])
+function get_slope(t1::EdgeVal{QQ}, t2::EdgeVal{QQ})
+	return Int((t2.val - t1.val)//abs(t2.pos - t1.pos))
 end
 
 # ╔═╡ 9e2eea60-1079-4fac-824c-c39e911dfa07
-function get_order(G::AbstractCurve, f::RationalFunction, v::Vertex)
+function get_order(G::TropicalCurve, f::RationalFunction, v::Vertex)
 	edges = edges_from(G, v)
 	slopes = map(e -> 
 		begin
 			vals = vals_along_edge(f, e)
+			if e.v1 == e.v2 # If edge is self-loop, it gives us two tangents
+				n = length(vals)
+				return get_slope(vals[1], vals[2]) + get_slope(vals[n], vals[n-1])
+			end
 			return get_slope(vals[1], vals[2])
 		end,
 		edges)
@@ -1148,11 +1184,11 @@ function get_order(G::AbstractCurve, f::RationalFunction, v::Vertex)
 end
 
 # ╔═╡ 02187687-8d09-4f42-a9c5-2cc784ece50a
-function get_order(G::AbstractCurve, f::RationalFunction, p::EdgePoint)
-	vals = vals_along_edge(p.edge)
+function get_order(G::TropicalCurve, f::RationalFunction, p::EdgePoint)
+	vals = vals_along_edge(f, p.edge)
 	j = 0 # j is the largest index such that the value val[j] comes `before` p on the edge
 	for i = 1:length(vals)
-		if vals[i][1] > p.dist
+		if vals[i].pos > p.pos
 			break
 		end
 		j = i
@@ -1161,7 +1197,7 @@ function get_order(G::AbstractCurve, f::RationalFunction, p::EdgePoint)
 		error("edge point has to be on the interior of the edge!")
 	end
 	# if p is not in the support of f we can return 0
-	if vals[j][1] != p.dist
+	if vals[j].pos != p.pos
 		return 0//1
 	end
 
@@ -1169,8 +1205,8 @@ function get_order(G::AbstractCurve, f::RationalFunction, p::EdgePoint)
 end
 
 # ╔═╡ 8cd3dc93-79b9-432c-9014-7e27acc8c7de
-function get_divisor(G::AbstractCurve, f::RationalFunction)
-	D = RatinonalDivisor(G)
+function get_divisor(G::TropicalCurve, f::RationalFunction)
+	D = RationalDivisor(G)
 	for v in 1:n_vertices(G)
 		D.vertex_vals[v] = get_order(G, f, v)
 	end
@@ -1180,13 +1216,153 @@ function get_divisor(G::AbstractCurve, f::RationalFunction)
 	return D
 end
 
-# ╔═╡ fbead972-4328-4189-972f-f6e9ac047b85
+# ╔═╡ f7b32461-33fa-4b87-91a5-35b8e21c5db5
 function as_rational_divisor(G::SubdividedCurve, D::Divisor)::RationalDivisor
 	curve = G.original_curve
 	Drat = RationalDivisor(curve)
 	Drat.vertex_vals = D[1:n_vertices(curve)]
-	# TODO: unfinished
+
+	for edge in get_edge_list(curve)
+		vs = G.added_vertices[edge]
+		l = length(vs)
+		for i in 1:l
+			val = D[vs[i]]
+			if val != 0 # we don't want to add 0 values
+				p = EdgePoint(edge, i//(l + 1))
+				set_edge_val!(Drat, p, val)
+			end
+		end
+	end
+	return Drat
 end
+
+# ╔═╡ 2da7bcb5-f962-448b-a3c9-e64b0770b718
+function as_rational_function(G::SubdividedCurve, f::LevelMap)::RationalFunction
+	if !G.is_uniform
+		error("expected a uniformly subdivided curve!")
+	end
+	
+	curve = G.original_curve
+	frat = RationalFunction(curve)
+	
+	frat.vertex_vals = f[1:n_vertices(curve)].//G.factor
+
+	for edge in get_edge_list(curve)
+		vs = G.added_vertices[edge]
+		l = length(vs)
+		prev = f[edge.v1]
+		for i in 1:l
+			val = f[vs[i]]
+			next = i == l ? f[edge.v2] : f[vs[i+1]]
+			# if the slope doesn't change we don't have to add this point,
+			# as it is not in the support
+			if val - prev != next - val 
+				p = EdgePoint(edge, i//(l + 1))
+				set_edge_val!(frat, p, val//G.factor)
+			end
+			prev = val
+		end
+	end
+	return frat
+end
+
+# ╔═╡ 92e833ec-373c-4dd6-8050-eee25d2a661c
+extr_curve, extr_div = extremals[k]
+
+# ╔═╡ 6d436ad3-b194-4049-9c6d-5ea24789ae59
+extr_orig = extr_curve.original_curve
+
+# ╔═╡ 2cae0e87-74e9-4ef3-872b-9a79f1cbaf2b
+as_rational_divisor(extr_curve, extr_div)
+
+# ╔═╡ dc9fe4df-7ed8-48c1-b7a8-492b88932a4b
+extr_level_map = get_level_map(extr_curve, canonical(extr_curve), extr_div)
+
+# ╔═╡ db2c3e18-ec07-4cce-b81a-701fa403a397
+extr_rat_fun = as_rational_function(extr_curve, extr_level_map)
+
+# ╔═╡ 4b7ba91d-a7a2-4c2e-bb47-9adc2ae3eaa1
+get_divisor(extr_orig, extr_rat_fun)
+
+# ╔═╡ dc8399f3-4d89-4695-8a09-0269da9e51c3
+function trop_add(d1::EdgeData{QQ}, d2::EdgeData{QQ})::EdgeData{QQ}
+	if d1[1].val < d2[1].val
+		d1, d2 = d2, d1
+	end
+	
+	d = [EdgeVal(0//1, d1[1].val)]
+	
+	i1, i2 = 1, 1
+	while i1 < length(d1) || i2 < length(d2)
+		s1 = get_slope(d1[i1], d1[i1+1])
+		s2 = get_slope(d2[i2], d2[i2+1])
+		if s1 != s2 # possible intersection
+			# Calculate the intersection pos x
+			x = (d1[i1].val - d2[i2].val +
+					d2[i2].pos * s2 - d1[i1].pos * s1) // (s2 - s1)
+			if x < min(d1[i1+1].pos, d2[i2+1].pos) &&
+					x > max(d1[i1].pos, d2[i2].pos)
+				# intersection takes before after next "bend"
+				# handle intersection
+				val = d1[i1].val + s1 * (x - d1[i1].pos)
+				push!(d, EdgeVal(x, val))
+
+				d1, d2 = d2, d1
+				i1, i2 = i2, i1
+			end
+		end
+
+		if d1[i1+1].pos < d2[i2+1].pos
+			push!(d, d1[i1+1])
+			i1 += 1
+		elseif d1[i1+1].pos > d2[i2+1].pos
+			i2 += 1
+		else 
+			push!(d, d1[i1+1])
+			i1 += 1
+			i2 += 1
+		end
+	end
+	return d
+end
+
+# ╔═╡ 4ab19cbe-cd43-4184-92b0-56374ef303af
+function trop_add(G::TropicalCurve, f1::RationalFunction, f2::RationalFunction)::RationalFunction
+	f = RationalFunction(G)
+	f.vertex_vals = max.(f1.vertex_vals, f2.vertex_vals)
+	for edge in get_edge_list(G)
+		d1 = vals_along_edge(f1, edge)
+		d2 = vals_along_edge(f2, edge)
+		d = trop_add(d1, d2)
+		f.edge_vals[edge] = d[2:length(d)-1]
+	end
+	return f
+end
+
+# ╔═╡ 8fe9393f-5bfb-4fdd-a9a3-fda6d08908f8
+function constant_function(G::TropicalCurve, c::QQ)::RationalFunction
+	f = RationalFunction(G)
+	f.vertex_vals = fill(c, n_vertices(G))
+	return f
+end
+
+# ╔═╡ bccdd43e-e2e6-4ea5-a3ed-377973fc019c
+d1 = vals_along_edge(extr_rat_fun, Edge(2, 2, 1))
+
+# ╔═╡ 14501f65-1018-4242-b97b-4ca1d5c432be
+@bind c Slider(1:30)
+
+# ╔═╡ fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
+d2 = [EdgeVal(0//1, -c//5), EdgeVal(1//1, -c//5)]
+
+# ╔═╡ 5a8e8748-9550-48cf-986d-1f4ff725a483
+trop_add(d1, d2)
+
+# ╔═╡ a91975e6-9974-4996-8654-6384971f850a
+fc = constant_function(extr_orig, -c//5)
+
+# ╔═╡ 88e42590-bcca-4dbe-be8b-525ac2461195
+trop_add(extr_orig, extr_rat_fun, fc)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2728,13 +2904,18 @@ version = "1.4.1+1"
 # ╠═bd64b2dd-0763-4f9b-a05b-7096e697047e
 # ╠═a06ecb0c-9b1b-41e4-874a-2e88493a38f4
 # ╟─ee4c165e-baeb-4b86-b910-390f6f27ac1c
-# ╟─892147af-cbc1-4600-8656-bb58c4fa3a37
-# ╟─c3286803-f241-45b1-91d2-f01387543290
+# ╠═892147af-cbc1-4600-8656-bb58c4fa3a37
+# ╠═c3286803-f241-45b1-91d2-f01387543290
 # ╟─e2211218-7977-44f1-b964-ef79ccf50a90
 # ╠═e3a335b8-3708-4a33-a1f3-49cdbb461530
 # ╠═49136ab0-1773-4d44-94e4-0832a4ab7d1b
 # ╟─5c639f7a-60c1-43b8-8723-0eeba879fed7
+# ╠═62dcb648-0f71-48a1-b787-cf640b0fe3e4
 # ╠═0ab8b971-4ba8-49d5-9ce0-903c38e8a140
+# ╠═550d1862-645d-4e90-9f87-651e823b12c5
+# ╠═9a3a3bd9-fcb5-4ce0-a08c-9b3c58f1b3b3
+# ╠═e2f9c63f-4bf0-4421-942f-00a36c7538ad
+# ╠═7b92bf44-5cc7-4085-859c-bb05d8f48b43
 # ╠═dadd0869-439d-45ed-9ae6-e50042026e17
 # ╠═1dffc2d6-c1bc-4471-adad-60d30b40eb5f
 # ╠═4e1ca42f-5596-42d5-bcc7-5dcf31966549
@@ -2747,6 +2928,22 @@ version = "1.4.1+1"
 # ╠═9e2eea60-1079-4fac-824c-c39e911dfa07
 # ╠═02187687-8d09-4f42-a9c5-2cc784ece50a
 # ╠═8cd3dc93-79b9-432c-9014-7e27acc8c7de
-# ╠═fbead972-4328-4189-972f-f6e9ac047b85
+# ╠═f7b32461-33fa-4b87-91a5-35b8e21c5db5
+# ╠═2da7bcb5-f962-448b-a3c9-e64b0770b718
+# ╠═92e833ec-373c-4dd6-8050-eee25d2a661c
+# ╠═6d436ad3-b194-4049-9c6d-5ea24789ae59
+# ╠═2cae0e87-74e9-4ef3-872b-9a79f1cbaf2b
+# ╠═dc9fe4df-7ed8-48c1-b7a8-492b88932a4b
+# ╠═db2c3e18-ec07-4cce-b81a-701fa403a397
+# ╠═4b7ba91d-a7a2-4c2e-bb47-9adc2ae3eaa1
+# ╠═dc8399f3-4d89-4695-8a09-0269da9e51c3
+# ╠═4ab19cbe-cd43-4184-92b0-56374ef303af
+# ╠═8fe9393f-5bfb-4fdd-a9a3-fda6d08908f8
+# ╠═bccdd43e-e2e6-4ea5-a3ed-377973fc019c
+# ╠═14501f65-1018-4242-b97b-4ca1d5c432be
+# ╠═fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
+# ╠═5a8e8748-9550-48cf-986d-1f4ff725a483
+# ╠═a91975e6-9974-4996-8654-6384971f850a
+# ╠═88e42590-bcca-4dbe-be8b-525ac2461195
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
