@@ -1080,6 +1080,9 @@ We will still suppose the edges are all of length 1.
 # ╔═╡ 62dcb648-0f71-48a1-b787-cf640b0fe3e4
 QQ = Rational{Int}
 
+# ╔═╡ 23da5070-ce99-477b-b320-38e71cad0e3f
+Infinity = 1//0
+
 # ╔═╡ 0ab8b971-4ba8-49d5-9ce0-903c38e8a140
 struct EdgePoint
 	edge::Edge
@@ -1105,11 +1108,14 @@ Base.show(io::IO, v::EdgeData{T}) where T = print(io, "[", join(v, ", "), "]")
 mutable struct RationalData{T<:Number}
 	vertex_vals::Vector{T} # Values on vertices
 	edge_vals::Dict{Edge, EdgeData{T}} # values on edges
-	function RationalData{T}(G::TropicalCurve, vals::Vector{T}) where T
-		new{T}(vals, Dict(map(e -> (e => []), get_edge_list(G))))
+	function RationalData{T}(edges::Vector{Edge}, vals::Vector{T}) where T
+		new{T}(vals, Dict(map(e -> (e => []), edges)))
 	end
 	function RationalData{T}(G::TropicalCurve) where T
-		RationalData{T}(G, Vector{T}(undef, n_vertices(G)))
+		RationalData{T}(get_edge_list(G), Vector{T}(undef, n_vertices(G)))
+	end
+	function RationalData{T}(edges::Vector{Edge}, n) where T
+		RationalData{T}(edges, Vector{T}(undef, n))
 	end
 end
 
@@ -1266,6 +1272,12 @@ function as_rational_function(G::SubdividedCurve, f::LevelMap)::RationalFunction
 	return frat
 end
 
+# ╔═╡ 54b69f50-84a0-43fc-a253-517d21046687
+md"""
+### Tests
+We test our functions on the extremal from before
+"""
+
 # ╔═╡ 92e833ec-373c-4dd6-8050-eee25d2a661c
 extr_curve, extr_div = extremals[k]
 
@@ -1283,6 +1295,18 @@ extr_rat_fun = as_rational_function(extr_curve, extr_level_map)
 
 # ╔═╡ 4b7ba91d-a7a2-4c2e-bb47-9adc2ae3eaa1
 get_divisor(extr_orig, extr_rat_fun)
+
+# ╔═╡ bb521b27-369e-4b9a-acfe-a24fa2c08200
+md"""
+## Tropical operations
+"""
+
+# ╔═╡ 8fe9393f-5bfb-4fdd-a9a3-fda6d08908f8
+function const_function(G::TropicalCurve, c::QQ)::RationalFunction
+	f = RationalFunction(G)
+	f.vertex_vals = fill(c, n_vertices(G))
+	return f
+end
 
 # ╔═╡ dc8399f3-4d89-4695-8a09-0269da9e51c3
 function trop_add(d1::EdgeData{QQ}, d2::EdgeData{QQ})::EdgeData{QQ}
@@ -1327,10 +1351,15 @@ function trop_add(d1::EdgeData{QQ}, d2::EdgeData{QQ})::EdgeData{QQ}
 end
 
 # ╔═╡ 4ab19cbe-cd43-4184-92b0-56374ef303af
-function trop_add(G::TropicalCurve, f1::RationalFunction, f2::RationalFunction)::RationalFunction
-	f = RationalFunction(G)
+function trop_add(f1::RationalFunction, f2::RationalFunction)::RationalFunction
+	# Recover information about the curve from f1
+	edges = collect(keys(f1.edge_vals))
+	n = length(f1.vertex_vals)
+	# If f2 is a rational function on a different graph, unexpected things may happen
+	
+	f = RationalFunction(edges, n)
 	f.vertex_vals = max.(f1.vertex_vals, f2.vertex_vals)
-	for edge in get_edge_list(G)
+	for edge in edges
 		d1 = vals_along_edge(f1, edge)
 		d2 = vals_along_edge(f2, edge)
 		d = trop_add(d1, d2)
@@ -1339,12 +1368,76 @@ function trop_add(G::TropicalCurve, f1::RationalFunction, f2::RationalFunction):
 	return f
 end
 
-# ╔═╡ 8fe9393f-5bfb-4fdd-a9a3-fda6d08908f8
-function constant_function(G::TropicalCurve, c::QQ)::RationalFunction
-	f = RationalFunction(G)
-	f.vertex_vals = fill(c, n_vertices(G))
-	return f
+# ╔═╡ 465838e5-a2e2-4f2f-b21f-9883f8550f20
+function trop_add(f1::RationalFunction, c::QQ)::RationalFunction
+	edges = collect(keys(f1.edge_vals))
+	n = length(f1.vertex_vals)
+	
+	f2 = RationalFunction(edges, fill(c, n))
+	return trop_add(f1, f2)
 end
+
+# ╔═╡ c3a7ede1-bb19-40d9-bd1d-96beeada643d
+trop_add(c::QQ, f::RationalFunction) = trop_add(f, c)
+
+# ╔═╡ 51eb48af-865a-4598-82ce-b551b9165aa0
+function trop_mult(f::RationalFunction, c::QQ)::RationalFunction
+	edges = collect(keys(f.edge_vals))
+	n = length(f.vertex_vals)
+	g = RationalFunction(edges, n)
+	g.vertex_vals = f.vertex_vals .+ c
+	for edge in edges
+		g.edge_vals[edge] = map(v -> EdgeVal(v.pos, v.val + c), f.vertex_cals[edge])
+	end
+end
+
+# ╔═╡ 332da1be-f79f-4d58-9c4c-b767043dc5f4
+trop_mult(c::QQ, f::RationalFunction) = trop_mult(f, c)
+
+# ╔═╡ 936e9084-85c7-4003-81fe-253cf402f783
+function trop_mult(f1::RationalFunction, f2::RationalFunction)::RationalFunction
+	edges = collect(keys(f1.edge_vals))
+	n = length(f1.vertex_vals)
+	g = RationalFunction(edges, n)
+	
+	g.vertex_vals = f1.vertex_vals + f2.vertex_vals
+	for edge in edges
+		d1 = f1.edge_vals[edge]
+		d2 = f2.edge_vals[edge]
+		d = []
+		i1, i2 = 1, 1
+		while i1 <= length(d1) || i2 <= length(d2)
+			if d1[i1].pos < d2[i2].pos
+				push!(d, d1[i1])
+				i1 += 1
+			elseif d1[i1].pos > d2[i2].pos
+				push!(d, d2[i2])
+				i2 += 1
+			else 
+				push!(d, d1[i1] + d2[i2])
+				i1 += 1
+				i2 += 1
+			end
+		end
+		g.edge_vals[edge] = d
+	end
+end
+
+# ╔═╡ 08b2b169-e214-4bc4-9624-f6c37144d09b
+md"""
+We are going to use the unconventional notation $\dot+, \dot{\times}$, because $\oplus, \otimes$ is not very legible in the notebook
+"""
+
+# ╔═╡ 1411076c-530c-4b0e-b2c3-24e71c135f23
+∔(a, b) = trop_add(a, b)
+
+# ╔═╡ 8e93880c-0333-407c-82b2-9156ad6ec6a7
+⨰(a, b) = trop_mult(a, b)
+
+# ╔═╡ 4930dbef-e105-4b97-a85c-651f81c332e0
+md"""
+### Tests
+"""
 
 # ╔═╡ bccdd43e-e2e6-4ea5-a3ed-377973fc019c
 d1 = vals_along_edge(extr_rat_fun, Edge(2, 2, 1))
@@ -1356,13 +1449,10 @@ d1 = vals_along_edge(extr_rat_fun, Edge(2, 2, 1))
 d2 = [EdgeVal(0//1, -c//5), EdgeVal(1//1, -c//5)]
 
 # ╔═╡ 5a8e8748-9550-48cf-986d-1f4ff725a483
-trop_add(d1, d2)
-
-# ╔═╡ a91975e6-9974-4996-8654-6384971f850a
-fc = constant_function(extr_orig, -c//5)
+d1 ∔ d2
 
 # ╔═╡ 88e42590-bcca-4dbe-be8b-525ac2461195
-trop_add(extr_orig, extr_rat_fun, fc)
+extr_rat_fun ∔ (-c//5)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2911,6 +3001,7 @@ version = "1.4.1+1"
 # ╠═49136ab0-1773-4d44-94e4-0832a4ab7d1b
 # ╟─5c639f7a-60c1-43b8-8723-0eeba879fed7
 # ╠═62dcb648-0f71-48a1-b787-cf640b0fe3e4
+# ╠═23da5070-ce99-477b-b320-38e71cad0e3f
 # ╠═0ab8b971-4ba8-49d5-9ce0-903c38e8a140
 # ╠═550d1862-645d-4e90-9f87-651e823b12c5
 # ╠═9a3a3bd9-fcb5-4ce0-a08c-9b3c58f1b3b3
@@ -2930,20 +3021,30 @@ version = "1.4.1+1"
 # ╠═8cd3dc93-79b9-432c-9014-7e27acc8c7de
 # ╠═f7b32461-33fa-4b87-91a5-35b8e21c5db5
 # ╠═2da7bcb5-f962-448b-a3c9-e64b0770b718
+# ╟─54b69f50-84a0-43fc-a253-517d21046687
 # ╠═92e833ec-373c-4dd6-8050-eee25d2a661c
 # ╠═6d436ad3-b194-4049-9c6d-5ea24789ae59
 # ╠═2cae0e87-74e9-4ef3-872b-9a79f1cbaf2b
 # ╠═dc9fe4df-7ed8-48c1-b7a8-492b88932a4b
 # ╠═db2c3e18-ec07-4cce-b81a-701fa403a397
 # ╠═4b7ba91d-a7a2-4c2e-bb47-9adc2ae3eaa1
+# ╟─bb521b27-369e-4b9a-acfe-a24fa2c08200
+# ╠═8fe9393f-5bfb-4fdd-a9a3-fda6d08908f8
 # ╠═dc8399f3-4d89-4695-8a09-0269da9e51c3
 # ╠═4ab19cbe-cd43-4184-92b0-56374ef303af
-# ╠═8fe9393f-5bfb-4fdd-a9a3-fda6d08908f8
+# ╠═465838e5-a2e2-4f2f-b21f-9883f8550f20
+# ╠═c3a7ede1-bb19-40d9-bd1d-96beeada643d
+# ╠═51eb48af-865a-4598-82ce-b551b9165aa0
+# ╠═332da1be-f79f-4d58-9c4c-b767043dc5f4
+# ╠═936e9084-85c7-4003-81fe-253cf402f783
+# ╟─08b2b169-e214-4bc4-9624-f6c37144d09b
+# ╠═1411076c-530c-4b0e-b2c3-24e71c135f23
+# ╠═8e93880c-0333-407c-82b2-9156ad6ec6a7
+# ╟─4930dbef-e105-4b97-a85c-651f81c332e0
 # ╠═bccdd43e-e2e6-4ea5-a3ed-377973fc019c
 # ╠═14501f65-1018-4242-b97b-4ca1d5c432be
 # ╠═fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
 # ╠═5a8e8748-9550-48cf-986d-1f4ff725a483
-# ╠═a91975e6-9974-4996-8654-6384971f850a
 # ╠═88e42590-bcca-4dbe-be8b-525ac2461195
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
