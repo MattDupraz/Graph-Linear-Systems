@@ -1511,6 +1511,12 @@ md"""
 ### Tests
 """
 
+# ╔═╡ 14501f65-1018-4242-b97b-4ca1d5c432be
+c = -9//6
+
+# ╔═╡ fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
+d2 = [EdgeVal(0//1, c), EdgeVal(1//1, c)]
+
 # ╔═╡ 0a1e7c69-1c46-4f4b-9b17-5f83db74b69f
 function represent_divisor(G::TropicalCurve, D::RationalDivisor)::Tuple{SubdividedCurve, Divisor}
 	n = n_vertices(G)
@@ -1609,19 +1615,13 @@ extr_f = as_rational_function(extr_curve, extr_l)
 get_divisor(extr_min, extr_f)
 
 # ╔═╡ bccdd43e-e2e6-4ea5-a3ed-377973fc019c
-d1 = vals_along_edge(extr_f, Edge(2, 2, 1))
-
-# ╔═╡ 14501f65-1018-4242-b97b-4ca1d5c432be
-@bind c Slider(1:30)
-
-# ╔═╡ fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
-d2 = [EdgeVal(0//1, -c//5), EdgeVal(1//1, -c//5)]
+d1 = vals_along_edge(extr_f, Edge(3, 4, 2))
 
 # ╔═╡ 5a8e8748-9550-48cf-986d-1f4ff725a483
 d1 ∔ d2
 
 # ╔═╡ 88e42590-bcca-4dbe-be8b-525ac2461195
-f = extr_f ∔ (-c//5)
+f = extr_f ∔ c
 
 # ╔═╡ fd128e08-ced2-427c-8d3a-feee6061c548
 D = get_divisor(extr_min, f)
@@ -3327,6 +3327,7 @@ version = "1.4.1+1"
 # ╠═1411076c-530c-4b0e-b2c3-24e71c135f23
 # ╠═8e93880c-0333-407c-82b2-9156ad6ec6a7
 # ╟─4930dbef-e105-4b97-a85c-651f81c332e0
+# ╠═14501f65-1018-4242-b97b-4ca1d5c432be
 # ╠═bccdd43e-e2e6-4ea5-a3ed-377973fc019c
 # ╠═fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
 # ╠═5a8e8748-9550-48cf-986d-1f4ff725a483
@@ -3334,7 +3335,6 @@ version = "1.4.1+1"
 # ╠═fd128e08-ced2-427c-8d3a-feee6061c548
 # ╠═0a1e7c69-1c46-4f4b-9b17-5f83db74b69f
 # ╠═9f5dcab2-1a65-49c7-a07f-8eb972c14ce5
-# ╠═14501f65-1018-4242-b97b-4ca1d5c432be
 # ╠═c8e6aab6-76c6-4dc7-81e2-8d2130c4f40b
 # ╟─d7273ded-86c8-4f3d-9894-3b493cfdec35
 # ╠═aa5b268a-69b2-4b33-9b44-60f35afa38a9
