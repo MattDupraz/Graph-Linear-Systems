@@ -1630,7 +1630,7 @@ end
 # ╔═╡ 5d5e62bd-d866-42f8-93f7-05e91997157a
 function is_in_span(f::RationalFunction, gens::Vector{RationalFunction})::Bool
 	a = map(g -> minimum(f ⨰ (-g)), gens)
-	return reduce(∔, gens .⨰ a) == f
+	return equals(reduce(∔, gens .⨰ a), f)
 end
 
 # ╔═╡ 4930dbef-e105-4b97-a85c-651f81c332e0
@@ -1757,7 +1757,7 @@ minimum(f)
 -f
 
 # ╔═╡ 4e61a932-ac0c-4ae2-9475-8b708084b2cc
-f ⨰ -f == const_function(G, 0//1)
+equals(f ⨰ -f, const_function(G, 0//1))
 
 # ╔═╡ 852c47ae-0ede-4f65-afe4-f128a6541c0b
 is_in_span(f ∔ (-9//6), [f, const_function(G, -1//1)])
