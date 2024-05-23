@@ -508,16 +508,40 @@ md"""
 We would ultimately like to understand the cell structure of |K|. We can try to look what are the cells corresponding to the divisors in the linear system on different subdivisions.
 """
 
+# ╔═╡ dcd5d596-b5a1-4deb-ab41-f1fc2c153003
+# ╠═╡ disabled = true
+#=╠═╡
+begin
+	cells = Set()
+	for i in 2:6
+		Gsub′ = subdivide_uniform(G, i)
+		linsys′ = get_linear_system(Gsub′, canonical(Gsub′))
+		union!(cells, map(D -> get_cell_data(Gsub′, canonical(Gsub′), D), linsys′))
+	end
+	cells
+end
+  ╠═╡ =#
+
 # ╔═╡ 48c4dc89-3263-4a39-8b6d-c9c0098bb20f
 md"""
 It turns out the number of cells is quite high (and a priori we did not even necessarily hit them all!)
 """
+
+# ╔═╡ 494b4125-68f0-4222-a5a6-57f7d0d2518c
+#=╠═╡
+length(cells)
+  ╠═╡ =#
 
 # ╔═╡ f8254b86-804c-455c-b1f6-0731c95cfa41
 md"""
 However, we know that the cells are generated as tropical modules by their vertices, so we could try to understand the cells starting from the set of vertices. From the description in [HMY], we know vertices correspond to divisors with no smooth cut set. This implies that if there are $k$ chips on an edge, they will lie on the $k$-th subdivision. In particular, the whole divisor will lie on the subdivision given by the `lcm` of edge degrees. So any vertex will like on a subdivision corresponding to the `lcm` of a partition of $\deg K = 2g-2$. For example, if $g=3$, we have that $\deg K = 4$ and so taking the `lcm` of any partition, we obtain that the vertices of the cell complex will appear in the subdivisions by $1, 2, 3, 4$.
 For $g=4$, we get $1, \dots, 6$, but for higher genus the number can go up quicker.
 """
+
+# ╔═╡ 3e6df12f-346c-4130-80ff-0de0fbf311f6
+#=╠═╡
+length(filter(cell -> get_cell_dimension(G, cell) == 0, cells))
+  ╠═╡ =#
 
 # ╔═╡ 8851df82-a44e-4786-a807-6c0a3a369680
 md"""
@@ -534,6 +558,12 @@ Let's find which divisors in the linear system are realizable and supported on t
 md"""
 We now plot the divisors, coloring them based on whether they are realizable or not
 """
+
+# ╔═╡ d597a663-c5d0-409e-9609-1eedad663562
+# ╠═╡ disabled = true
+#=╠═╡
+j=128
+  ╠═╡ =#
 
 # ╔═╡ db0425c2-4908-4ae8-a9f7-f811bb926d76
 md"""
@@ -1565,6 +1595,9 @@ linsyssub = get_linear_system(Gsub, canonical(Gsub);
 # ╔═╡ 909f79dd-df94-4251-963f-d2f7a4659c39
 length(linsyssub)
 
+# ╔═╡ 3693da51-d30c-4df9-8292-348065f3e89f
+@bind j Slider(1:length(linsyssub), show_value=true)
+
 # ╔═╡ 2d08866d-8ee4-4143-a5b8-68488f4d201d
 is_extremal(G, as_rational_divisor(Gsub, linsyssub[j]))
 
@@ -1573,30 +1606,6 @@ cell = get_cell_data(Gsub, canonical(Gsub), linsyssub[j])
 
 # ╔═╡ 0ac1df76-2ba9-48d9-b4b4-543c180f1cd6
 get_cell_dimension(G, cell)
-
-# ╔═╡ dcd5d596-b5a1-4deb-ab41-f1fc2c153003
-# ╠═╡ disabled = true
-#=╠═╡
-begin
-	cells = Set()
-	for i in 2:6
-		Gsub′ = subdivide_uniform(G, i)
-		linsys′ = get_linear_system(Gsub′, canonical(Gsub′))
-		union!(cells, map(D -> get_cell_data(Gsub′, canonical(Gsub′), D), linsys′))
-	end
-	cells
-end
-  ╠═╡ =#
-
-# ╔═╡ 494b4125-68f0-4222-a5a6-57f7d0d2518c
-#=╠═╡
-length(cells)
-  ╠═╡ =#
-
-# ╔═╡ 3e6df12f-346c-4130-80ff-0de0fbf311f6
-#=╠═╡
-length(filter(cell -> get_cell_dimension(G, cell) == 0, cells))
-  ╠═╡ =#
 
 # ╔═╡ 959e24f2-9df0-44d3-b0a7-bf35c9763859
 function equals(d1::EdgeData{QQ}, d2::EdgeData{QQ})::Bool
@@ -1901,15 +1910,6 @@ end
 		node_weights=weights,
 		nodesize=0.1)
 end
-  ╠═╡ =#
-
-# ╔═╡ 3693da51-d30c-4df9-8292-348065f3e89f
-@bind j Slider(1:length(linsyssub), show_value=true)
-
-# ╔═╡ d597a663-c5d0-409e-9609-1eedad663562
-# ╠═╡ disabled = true
-#=╠═╡
-j=128
   ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
