@@ -92,6 +92,13 @@ function add_edge!(G::TropicalCurve, v1::Vertex, v2::Vertex)
 	G.adj_matrix[v2, v1] += 1
 end
 
+# ╔═╡ 02e24c8e-a104-4c72-ab0c-00603897f6fe
+function add_edges!(G::TropicalCurve, edges::Tuple{Vertex, Vertex}...)
+	for e in edges
+		add_edge!(G, e[1], e[2])
+	end
+end
+
 # ╔═╡ 48c2b423-e2d0-42a5-b608-d6aaf7c774ea
 VertexSet = BitVector
 
@@ -559,12 +566,6 @@ md"""
 We now plot the divisors, coloring them based on whether they are realizable or not
 """
 
-# ╔═╡ d597a663-c5d0-409e-9609-1eedad663562
-# ╠═╡ disabled = true
-#=╠═╡
-j=128
-  ╠═╡ =#
-
 # ╔═╡ db0425c2-4908-4ae8-a9f7-f811bb926d76
 md"""
 We can also only look at realizable divisors:
@@ -644,7 +645,7 @@ mutable struct RationalData{T<:Number}
 	function RationalData{T}(G::TropicalCurve) where T
 		RationalData{T}(collect(edges(G)), Vector{T}(undef, n_vertices(G)))
 	end
-	function RationalData{T}(edges::Vector{Edge}, n) where T
+	function RationalData{T}(edges::Vector{Edge}, n::Int) where T
 		RationalData{T}(edges, Vector{T}(undef, n))
 	end
 end
@@ -654,6 +655,22 @@ RationalDivisor = RationalData{Int}
 
 # ╔═╡ 88215e30-2edc-456b-b13d-fb444a5d38d0
 RationalFunction = RationalData{QQ}
+
+# ╔═╡ 44b4779e-5502-4c2e-8cbd-d11d7b57d2a4
+function get_rational_function(G::TropicalCurve, slope_data::SlopeData)::RationalFunction
+	vertex_vals = fill(0//1, n_vertices(G))
+	edge_vals = Dict{Edge, EdgeData{QQ}}()
+	for edge in edges(G)
+		slopes = slope_data[edge]
+		if slopes != (0, 0)
+			pos = slopes[2] // sum(slopes)
+			edge_vals[edge] = [EdgeVal(pos, slopes[1] * pos)]
+		else
+			edge_vals[edge] = []
+		end
+	end
+	return RationalFunction(vertex_vals, edge_vals)
+end
 
 # ╔═╡ 8a849b8a-f784-4c75-a518-ad222e5519ba
 function Base.show(io::IO, D::RationalData{T}) where T
@@ -930,39 +947,6 @@ function subdivide_uniform(G::AbstractCurve, f)::SubdividedCurve
 	end
 	return Gsub
 end
-
-# ╔═╡ 74f9914d-1ed4-4b94-8222-74cac97eea1a
-begin
-	G = TropicalCurve(6)
-	add_edge!(G, 1, 2)
-	add_edge!(G, 1, 2)
-	add_edge!(G, 2, 3)
-	add_edge!(G, 3, 4)
-	add_edge!(G, 3, 4)
-	add_edge!(G, 4, 5)
-	add_edge!(G, 5, 6)
-	add_edge!(G, 5, 6)
-	add_edge!(G, 6, 1)
-	
-	Gsub = subdivide_uniform(G, 5)
-end
-
-# ╔═╡ c40dd6b8-d2b2-4cff-bafb-45881121ad7b
-# Can calculate pseudo-inverse of firing matrix
-ifm = pinv(Matrix(firing_matrix(G)))
-
-# ╔═╡ 1ded8790-b02a-4dc7-8065-b698fae387d7
-min_support = vec(get_valences(Gsub) .> 2)
-
-# ╔═╡ e7225052-be4a-4a31-baa1-53c82231a7c7
-plotcurve(G; labels=canonical(G), nodesize=0.2)
-
-# ╔═╡ e3a335b8-3708-4a33-a1f3-49cdbb461530
-simple = subdivide_simple(G)
-
-# ╔═╡ 49136ab0-1773-4d44-94e4-0832a4ab7d1b
-# Simple subdivision
-plotcurve(simple; labels=canonical(simple), nodesize=0.2)
 
 # ╔═╡ fcb4e5b8-2fc0-450d-989c-0d7731186534
 function outgoing_slopes(G::AbstractCurve, v::Vertex, f::LevelMap)::Vector{Int}
@@ -1375,15 +1359,10 @@ function is_inconvenient(G::AbstractCurve, v::Vertex, f::LevelMap)::Bool
 end
 
 # ╔═╡ e26e2225-9739-4ffe-b3f5-e0fe7ee0a8ac
-function is_realizable(G::AbstractCurve, D::Divisor)
+function is_realizable(G::AbstractCurve, f::LevelMap)
 	# Checks whether a canonical divisor is realizable using
 	# the characterization from [MUW17] + simplifications
 	# I described in my report
-	f = get_level_map(G, canonical(G), D)
-	if isnothing(f)
-		return false
-	end
-
 	n = n_vertices(G)
 
 	for edge in horizontal_edges(G, f)
@@ -1509,11 +1488,11 @@ end
 # ╔═╡ 26dc12f2-0b46-4811-8796-59f231313083
 function get_linear_system(G::AbstractCurve, D::Divisor;
 					restrict_support::Union{BitVector, Nothing}=nothing)::
-		Vector{Divisor}
+		Tuple{Vector{Divisor}, Vector{LevelMap}}
 	# Returns a list of divisors on the given linear system
-	D, _ = reduce_divisor(G, D, 1)
-	if !is_effective(D)
-		return []
+	Dred, f = reduce_divisor(G, D, 1)
+	if !is_effective(Dred)
+		return [], []
 	end
 
 	# Reorder vertices of the graph, so that v is connected to the subgraph
@@ -1528,7 +1507,7 @@ function get_linear_system(G::AbstractCurve, D::Divisor;
 	res_supp_perm = isnothing(restrict_support) ?
 								nothing : restrict_support[p]
 
-	level_maps = get_legal_level_maps(Gperm, D[p], [0];
+	level_maps = get_legal_level_maps(Gperm, Dred[p], [0];
 					reduced=true,
 					restrict_support=res_supp_perm)
 	# Apply reverse permutation to level maps so they apply to the original graph
@@ -1536,76 +1515,9 @@ function get_linear_system(G::AbstractCurve, D::Divisor;
 	level_maps = map(f -> f[inv_p], level_maps)
 	
 	# Return the corresponding divisors
-	fm = firing_matrix(G)
-	return map(f -> D + fm * f, level_maps)
+	F = firing_matrix(G)
+	return map(g -> Dred + F * g, level_maps), map(g -> g + f, level_maps)
 end
-
-# ╔═╡ 3fed3606-ece2-42b9-b83a-68190dd46b6f
-function get_extremals(G::TropicalCurve, D::Divisor)::
-										Vector{RationalDivisor}
-	# Returns a list of extremals on a suitably subdivided curve
-	# Since extremals have no smooth cut set, the values of a rational function
-	# on the vertices are all integral, so we can find the vertices that belong
-	# to the linear system and are supported on the vertices
-	linsys = get_linear_system(G, D)
-	extremals = []
-	for divisor in linsys
-		edge_list = edges(G) |> collect
-		# Any extremal will be obtained by specifying a slope on all half-edges,
-		# which keeps the divisor effective
-		slopes = get_possible_slopes(edge_list, divisor)
-		for slope_data in slopes
-			candidate = get_rational_divisor(G, divisor, slope_data)
-			if is_extremal(G, candidate)
-				push!(extremals, candidate)
-			end
-		end
-	end
-	return extremals
-end
-
-# ╔═╡ 7bfdfd4d-0528-45a7-8e32-3786dea43490
-extremals = get_extremals(G, canonical(G))
-
-# ╔═╡ 892147af-cbc1-4600-8656-bb58c4fa3a37
-@bind k Slider(1:length(extremals))
-
-# ╔═╡ 45690265-03a2-4109-9a9a-e7e35d13b094
-@bind extr Slider(extremals)
-
-# ╔═╡ 6baf72c1-488e-47f1-87b7-01dcd2bf9904
-extr
-
-# ╔═╡ 9fb142ec-fc14-4d27-ae75-22937390a556
-linsys = get_linear_system(G, canonical(G))
-
-# ╔═╡ cdffab39-0e2e-4689-b7c4-4b526f7c07ee
-length(linsys)
-
-# ╔═╡ 4e1ae109-550c-4b30-86d0-894f66187b41
-@bind i Slider(1:length(linsys))
-
-# ╔═╡ f43e1972-394d-4606-9ff9-de3d7beabf53
-plotcurve(G; labels=linsys[i], nodesize=0.2)
-
-# ╔═╡ 8847e6a0-50de-4f4e-9ed0-881afe266418
-linsyssub = get_linear_system(Gsub, canonical(Gsub);
-								restrict_support=nothing)
-
-# ╔═╡ 909f79dd-df94-4251-963f-d2f7a4659c39
-length(linsyssub)
-
-# ╔═╡ 3693da51-d30c-4df9-8292-348065f3e89f
-@bind j Slider(1:length(linsyssub), show_value=true)
-
-# ╔═╡ 2d08866d-8ee4-4143-a5b8-68488f4d201d
-is_extremal(G, as_rational_divisor(Gsub, linsyssub[j]))
-
-# ╔═╡ 8d2fef46-57f1-4c3c-ae08-74b1adf76049
-cell = get_cell_data(Gsub, canonical(Gsub), linsyssub[j])
-
-# ╔═╡ 0ac1df76-2ba9-48d9-b4b4-543c180f1cd6
-get_cell_dimension(G, cell)
 
 # ╔═╡ 959e24f2-9df0-44d3-b0a7-bf35c9763859
 function equals(d1::EdgeData{QQ}, d2::EdgeData{QQ})::Bool
@@ -1688,18 +1600,246 @@ function represent_divisor(G::TropicalCurve, D::RationalDivisor)::Tuple{Subdivid
 	return Gsub, Dsub
 end
 
-# ╔═╡ 2ebf9f00-7c5f-4620-8ce9-e95aecd3ddf5
-function is_realizable(G::TropicalCurve, D::RationalDivisor)
+# ╔═╡ da813d4f-306f-43b8-bd91-e8161d7ae7b8
+function get_rational_function(G::TropicalCurve, D::RationalDivisor)::RationalFunction
 	Gsub, Dsub = represent_divisor(G, D)
-	return is_realizable(Gsub, Dsub)
+	l = get_level_map(Gsub, canonical(Gsub), Dsub)
+	return as_rational_function(Gsub, l)
 end
+
+# ╔═╡ 3fed3606-ece2-42b9-b83a-68190dd46b6f
+function get_extremals(G::TropicalCurve, D::Divisor)::
+						Tuple{Vector{RationalDivisor}, Vector{RationalFunction}}
+	# Returns a list of extremals on a suitably subdivided curve
+	# Since extremals have no smooth cut set, the values of a rational function
+	# on the vertices are all integral, so we can find the vertices that belong
+	# to the linear system and are supported on the vertices
+	linsys, linsys_fns = get_linear_system(G, D)
+	extremals, extremals_fns = [], []
+	for (divisor, f) in zip(linsys, linsys_fns)
+		edge_list = edges(G) |> collect
+		# Any extremal will be obtained by specifying a slope on all half-edges,
+		# which keeps the divisor effective
+		slopes = get_possible_slopes(edge_list, divisor)
+		for slope_data in slopes
+			candidate = get_rational_divisor(G, divisor, slope_data)
+			if is_extremal(G, candidate)
+				push!(extremals, candidate)
+				f_rat = RationalFunction(collect(edges(G)), convert(Vector{QQ}, f))
+				push!(extremals_fns, f_rat ⨰ get_rational_function(G, slope_data))
+			end
+		end
+	end
+	return extremals, extremals_fns
+end
+
+# ╔═╡ 54b84c34-fc46-4e5a-adc2-17c19f09ea27
+function represent_function(G::TropicalCurve, f::RationalFunction)::Tuple{SubdividedCurve, LevelMap}
+	n = n_vertices(G)
+	# We will need to subdivide the graph so that the resulting divisor is supported
+	# on vertices, so take the LCM of the needed subdivisions of all edges
+	factor = 1
+	for edgedata in values(f.edge_vals)
+		for p in edgedata
+			factor = lcm(factor, max(denominator(p.pos), 1))
+		end
+	end
+
+	Gsub = subdivide_uniform(G, factor)
+	fsub = fill(0, n_vertices(Gsub))
+	fsub[1:n] = convert(Vector{Int}, f.vertex_vals .* factor)
+	for edge in edges(G)
+		vals = vals_along_edge(f, edge)
+		j = 1
+		for i in 1:factor-1
+			pos = i//factor
+			while j < length(vals) && vals[j+1].pos < pos
+				j += 1
+			end
+			slope = get_slope(vals[j], vals[j+1])
+			val = vals[j].val + (pos - vals[j].pos) * slope
+			fsub[Gsub.added_vertices[edge][i]] = Int(factor * val)
+		end
+	end
+	return Gsub, fsub
+end
+
+# ╔═╡ 2ebf9f00-7c5f-4620-8ce9-e95aecd3ddf5
+function is_realizable(G::TropicalCurve, f::RationalFunction)
+	Gsub, fsub = represent_function(G, f)
+	return is_realizable(Gsub, fsub)
+end
+
+# ╔═╡ 14501f65-1018-4242-b97b-4ca1d5c432be
+c = -9//6
+
+# ╔═╡ fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
+d2 = [EdgeVal(0//1, c), EdgeVal(1//1, c)]
+
+# ╔═╡ c8e6aab6-76c6-4dc7-81e2-8d2130c4f40b
+# ╠═╡ disabled = true
+#=╠═╡
+a = plotcurve(Gsub2; labels=Dsub2 + canonical(Gsub2), nodesize=0.1)
+  ╠═╡ =#
+
+# ╔═╡ e58f96bf-0f50-422b-b4af-9413f99f0be2
+md"""
+# Graphs of genus 3 and 4
+
+We will now construct all the trivalent graphs of genus 3 and 4 to test our hypotheses.
+"""
+
+# ╔═╡ 7f0bf819-4f1c-4c9f-bbfb-50917d8f7308
+md"""
+## Genus 3 graphs
+"""
+
+# ╔═╡ 7cdf9648-2a1b-43c3-957d-794f5d544829
+begin
+	g3_000 = TropicalCurve(4)
+	add_edges!(g3_000, (1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4))
+	g3_020 = TropicalCurve(4)
+	add_edges!(g3_020, (1, 2), (1, 2), (3, 4), (3, 4), (1, 3), (2, 4))
+	g3_111 = TropicalCurve(4)
+	add_edges!(g3_111, (1, 2), (1, 2), (1, 3), (2, 3), (3, 4), (4, 4))
+	g3_212 = TropicalCurve(4)
+	add_edges!(g3_212, (1, 1), (1, 2), (2, 3), (2, 3), (3, 4), (4, 4))
+	g3_303 = TropicalCurve(4)
+	add_edges!(g3_303, (1, 1), (2, 2), (3, 3), (1, 4), (2, 4), (3, 4))
+	g3_graphs = [g3_000, g3_020, g3_111, g3_212, g3_303]
+end
+
+# ╔═╡ 159013b4-347a-419e-beaf-1fd729549793
+	g3_graphs_plots = map(G -> plotcurve(G), g3_graphs)
+
+# ╔═╡ 70b39e19-eb18-4a8b-bf0c-231725b8aec9
+g3_extremals = map(G -> get_extremals(G, canonical(G)), g3_graphs)
+
+# ╔═╡ 1eab617b-ec1e-424f-b722-7c6684c33a46
+md"""
+## Genus 4 graphs
+"""
+
+# ╔═╡ fc6780d8-2cac-4b9b-8300-5f9bf0d23f0b
+begin
+	g4_000a = TropicalCurve(6)
+	add_edges!(g4_000a, (1, 2), (1, 3), (2, 3), (3, 4),
+					(1, 5), (2, 6), (4, 5), (4, 6), (5, 6))
+	g4_000b = TropicalCurve(6)
+	add_edges!(g4_000b, (1, 2), (1, 4), (1, 6), (3, 2),
+					(3, 4), (3, 6), (5, 2), (5, 4), (5, 6))
+	g4_010 = TropicalCurve(6)
+	add_edges!(g4_010, (1, 2), (1, 2), (1, 3), (2, 4),
+					(3, 5), (4, 5), (3, 6), (4, 6), (5, 6))
+	g4_020 = TropicalCurve(6)
+	add_edges!(g4_020, (1, 2), (1, 2), (5, 6), (5, 6),
+					(3, 4), (1, 3), (3, 5), (2, 4), (4, 6))
+	g4_021 = TropicalCurve(6)
+	add_edges!(g4_021, (1, 2), (1, 2), (1, 3), (2, 3),
+					(3, 4), (4, 5), (4, 6), (5, 6), (5, 6))
+	g4_030 = TropicalCurve(6)
+	add_edges!(g4_030, (1, 2), (1, 2), (2, 3), (3, 4),
+					(3, 4), (4, 5), (5, 6), (5, 6), (6, 1))
+	g4_101 = TropicalCurve(6)
+	add_edges!(g4_101, (1, 2), (1, 3), (1, 4), (2, 3),
+	                  (3, 4), (2, 5), (4, 5), (5, 6), (6, 6))
+	g4_111 = TropicalCurve(6)
+	add_edges!(g4_111, (1, 2), (1, 2), (1, 3), (2, 4),
+	                  (3, 4), (3, 5), (4, 5), (5, 6), (6, 6))
+	g4_121 = TropicalCurve(6)
+	add_edges!(g4_121, (1, 2), (1, 3), (1, 3), (2, 4),
+	                  (2, 4), (3, 5), (4, 5), (5, 6), (6, 6))
+	g4_122 = TropicalCurve(6)
+	add_edges!(g4_122, (1, 2), (1, 2), (1, 3), (2, 3),
+	                  (3, 4), (4, 5), (4, 5), (5, 6), (6, 6))
+	g4_202 = TropicalCurve(6)
+	add_edges!(g4_202, (1, 1), (1, 2), (2, 3), (2, 4),
+	                  (3, 4), (3, 5), (4, 5), (5, 6), (6, 6))
+	g4_212 = TropicalCurve(6)
+	add_edges!(g4_212, (1, 1), (1, 2), (2, 3), (3, 4),
+	                  (4, 4), (2, 5), (3, 6), (5, 6), (5, 6))
+	g4_213 = TropicalCurve(6)
+	add_edges!(g4_213, (1, 2), (1, 2), (1, 3), (2, 3),
+	                  (3, 4), (4, 6), (4, 5), (6, 6), (5, 5))
+	g4_223 = TropicalCurve(6)
+	add_edges!(g4_223, (1, 1), (1, 2), (2, 3), (2, 3),
+	                  (3, 4), (4, 5), (4, 5), (5, 6), (6, 6))
+	g4_303 = TropicalCurve(6)
+	add_edges!(g4_303, (1, 1), (1, 2), (2, 3), (2, 4),
+	                  (3, 4), (3, 5), (5, 5), (4, 6), (6, 6))
+	g4_314 = TropicalCurve(6)
+	add_edges!(g4_314, (1, 1), (1, 2), (2, 3), (2, 3),
+	                  (3, 4), (4, 5), (4, 6), (5, 5), (6, 6))
+	g4_405 = TropicalCurve(6)
+	add_edges!(g4_405, (1, 1), (1, 2), (3, 3), (3, 2),
+	                  (2, 4), (4, 5), (5, 5), (4, 6), (6, 6))
+	g4_graphs = [g4_000a, g4_000b, g4_010, g4_020, g4_021, g4_030, g4_101, g4_111, 
+		g4_121, g4_122, g4_202, g4_212, g4_213, g4_223, g4_303, g4_314, g4_405]
+end
+
+# ╔═╡ 74f9914d-1ed4-4b94-8222-74cac97eea1a
+begin
+	G = g4_graphs[7]
+	
+	Gsub = subdivide_uniform(G, 2)
+end
+
+# ╔═╡ c40dd6b8-d2b2-4cff-bafb-45881121ad7b
+# Can calculate pseudo-inverse of firing matrix
+ifm = pinv(Matrix(firing_matrix(G)))
+
+# ╔═╡ 7bfdfd4d-0528-45a7-8e32-3786dea43490
+extremals, extremals_fns = get_extremals(G, canonical(G))
+
+# ╔═╡ eee12d9c-cdd9-4cde-9584-56dcd8b1f64e
+length(extremals)
+
+# ╔═╡ 892147af-cbc1-4600-8656-bb58c4fa3a37
+@bind k Slider(1:length(extremals))
+
+# ╔═╡ 45690265-03a2-4109-9a9a-e7e35d13b094
+@bind extr Slider(extremals)
+
+# ╔═╡ 6baf72c1-488e-47f1-87b7-01dcd2bf9904
+extr
+
+# ╔═╡ 9fb142ec-fc14-4d27-ae75-22937390a556
+linsys, linsys_fns = get_linear_system(G, canonical(G))
+
+# ╔═╡ cdffab39-0e2e-4689-b7c4-4b526f7c07ee
+length(linsys)
+
+# ╔═╡ 4e1ae109-550c-4b30-86d0-894f66187b41
+@bind i Slider(1:length(linsys))
+
+# ╔═╡ 1ded8790-b02a-4dc7-8065-b698fae387d7
+min_support = vec(get_valences(Gsub) .> 2)
+
+# ╔═╡ 8847e6a0-50de-4f4e-9ed0-881afe266418
+linsyssub, linsyssub_fns = get_linear_system(Gsub, canonical(Gsub);
+								restrict_support=nothing)
+
+# ╔═╡ 909f79dd-df94-4251-963f-d2f7a4659c39
+length(linsyssub)
+
+# ╔═╡ e7225052-be4a-4a31-baa1-53c82231a7c7
+plotcurve(G; labels=canonical(G), nodesize=0.2)
+
+# ╔═╡ f43e1972-394d-4606-9ff9-de3d7beabf53
+plotcurve(G; labels=linsys[i], nodesize=0.2)
 
 # ╔═╡ fbf87769-b401-4082-a8c0-1775dd444978
 begin
-	realizable_divs = map(D -> is_realizable(Gsub, D), linsyssub)
+	realizable_divs = map(f -> is_realizable(Gsub, f), linsyssub_fns)
 	realizable_indices = (1:length(linsyssub))[realizable_divs]
 	nonrealizable_indices = (1:length(linsyssub))[.!realizable_divs]
 end
+
+# ╔═╡ 91609fae-5ab3-45aa-96b6-962ce3240268
+@bind j1 Slider(1:length(realizable_indices))
+
+# ╔═╡ bd64b2dd-0763-4f9b-a05b-7096e697047e
+@bind j2 Slider(1:length(nonrealizable_indices))
 
 # ╔═╡ 0df36f16-4b8c-408b-8732-2af134f30b01
 plotcurve(Gsub;
@@ -1707,17 +1847,23 @@ plotcurve(Gsub;
 	color=realizable_divs[j] ? "white" : "red",
 	nodesize=0.1)
 
-# ╔═╡ 91609fae-5ab3-45aa-96b6-962ce3240268
-@bind j1 Slider(1:length(realizable_indices))
+# ╔═╡ 5e7d1c5b-ad8f-4fcf-98d5-2b46afb346ce
+as_rational_function(Gsub, linsyssub_fns[j])
+
+# ╔═╡ 2d08866d-8ee4-4143-a5b8-68488f4d201d
+is_extremal(G, as_rational_divisor(Gsub, linsyssub[j]))
+
+# ╔═╡ 8d2fef46-57f1-4c3c-ae08-74b1adf76049
+cell = get_cell_data(Gsub, canonical(Gsub), linsyssub[j])
+
+# ╔═╡ 0ac1df76-2ba9-48d9-b4b4-543c180f1cd6
+get_cell_dimension(G, cell)
 
 # ╔═╡ bb5742f8-8e2e-4665-a5db-60b8d3a0cb2f
 # Plot only realizable divisors
 plotcurve(Gsub;
 	labels=linsyssub[realizable_indices[j1]], 
 	nodesize=0.1)
-
-# ╔═╡ bd64b2dd-0763-4f9b-a05b-7096e697047e
-@bind j2 Slider(1:length(nonrealizable_indices))
 
 # ╔═╡ a06ecb0c-9b1b-41e4-874a-2e88493a38f4
 # Plot only non-realizable divisors
@@ -1727,37 +1873,22 @@ plotcurve(Gsub;
 	nodesize=0.1)
 
 # ╔═╡ d32297ed-5d28-4f49-9ad2-dedd71ae6dae
-realizable_extremals = filter(D -> is_realizable(G, D), extremals)
+realizable_extremals = map(f -> is_realizable(G, f), extremals_fns)
 
 # ╔═╡ c3286803-f241-45b1-91d2-f01387543290
 # Plot extremals
 begin
 	curve, divisor = represent_divisor(G, extremals[k])
-	realizable = is_realizable(curve, divisor)
 	plotcurve(curve; labels=divisor,
-		color=realizable ? "white" : "red",
+		color=realizable_extremals[k] ? "white" : "red",
 		nodesize=0.1)
 end
 
-# ╔═╡ da813d4f-306f-43b8-bd91-e8161d7ae7b8
-function get_rational_function(G::TropicalCurve, D::RationalDivisor)::RationalFunction
-	Gsub, Dsub = represent_divisor(G, D)
-	l = get_level_map(Gsub, canonical(Gsub), Dsub)
-	return as_rational_function(Gsub, l)
-end
-
-# ╔═╡ a69a9ef2-2e3f-44c2-8d57-7fac24850936
-realizable_extremals_fns = map(D -> get_rational_function(G, D), realizable_extremals)
-
-# ╔═╡ 8b8bfbae-bc85-4fe2-806a-4e31d0b554ad
-extremals_fns = map(D -> get_rational_function(G, D), extremals)
-
 # ╔═╡ 1cb5b220-6210-4bc1-800f-73504450c8c8
 for (i, D) in enumerate(linsyssub)
-	l = get_level_map(Gsub, canonical(Gsub), D)
-	f = as_rational_function(Gsub, l)
+	f = as_rational_function(Gsub, linsyssub_fns[i])
 	realiz = realizable_divs[i]
-	in_span = is_in_span(f, realizable_extremals_fns)
+	in_span = is_in_span(f, extremals_fns[realizable_extremals])
 	if realiz != in_span
 		println("Divisor n. ", i, ": realizable=", realiz, ", in_span=", in_span)
 	end
@@ -1765,6 +1896,13 @@ for (i, D) in enumerate(linsyssub)
 		println("! Divisor n. ", i, " not in the span of extremals !")
 	end
 end
+
+# ╔═╡ e3a335b8-3708-4a33-a1f3-49cdbb461530
+simple = subdivide_simple(G)
+
+# ╔═╡ 49136ab0-1773-4d44-94e4-0832a4ab7d1b
+# Simple subdivision
+plotcurve(simple; labels=canonical(simple), nodesize=0.2)
 
 # ╔═╡ 92e833ec-373c-4dd6-8050-eee25d2a661c
 extr_curve, extr_div = represent_divisor(G, extr)
@@ -1790,12 +1928,6 @@ get_divisor(extr_min, extr_f)
 # ╔═╡ bccdd43e-e2e6-4ea5-a3ed-377973fc019c
 d1 = vals_along_edge(extr_f, Edge(3, 4, 2))
 
-# ╔═╡ 14501f65-1018-4242-b97b-4ca1d5c432be
-c = -9//6
-
-# ╔═╡ fa73c8bd-86a0-43f9-9e61-59f02c4a2a7d
-d2 = [EdgeVal(0//1, c), EdgeVal(1//1, c)]
-
 # ╔═╡ 5a8e8748-9550-48cf-986d-1f4ff725a483
 d1 ∔ d2
 
@@ -1808,23 +1940,23 @@ minimum(f)
 # ╔═╡ dc24fff9-8c65-4a90-9d0e-4693964c11b5
 -f
 
-# ╔═╡ 4e61a932-ac0c-4ae2-9475-8b708084b2cc
-equals(f ⨰ -f, const_function(G, 0//1))
-
-# ╔═╡ 852c47ae-0ede-4f65-afe4-f128a6541c0b
-is_in_span(f ∔ (-9//6), [f, const_function(G, -1//1)])
-
 # ╔═╡ fd128e08-ced2-427c-8d3a-feee6061c548
 D = get_divisor(extr_min, f)
 
 # ╔═╡ 9f5dcab2-1a65-49c7-a07f-8eb972c14ce5
 Gsub2, Dsub2 = represent_divisor(extr_min, D)
 
-# ╔═╡ c8e6aab6-76c6-4dc7-81e2-8d2130c4f40b
-# ╠═╡ disabled = true
-#=╠═╡
-a = plotcurve(Gsub2; labels=Dsub2 + canonical(Gsub2), nodesize=0.1)
-  ╠═╡ =#
+# ╔═╡ 4e61a932-ac0c-4ae2-9475-8b708084b2cc
+equals(f ⨰ -f, const_function(G, 0//1))
+
+# ╔═╡ 852c47ae-0ede-4f65-afe4-f128a6541c0b
+is_in_span(f ∔ (-9//6), [f, const_function(G, -1//1)])
+
+# ╔═╡ e0cb562a-f5ce-4c04-b938-3de3311f977f
+g4_graphs_plots = map(G -> plotcurve(G), g4_graphs)
+
+# ╔═╡ 32a8737e-51de-47c4-9f3c-7bc0e8492651
+g4_extremals = map(G -> get_extremals(G, canonical(G)), g4_graphs)
 
 # ╔═╡ d7273ded-86c8-4f3d-9894-3b493cfdec35
 md"""
@@ -1910,6 +2042,15 @@ end
 		node_weights=weights,
 		nodesize=0.1)
 end
+  ╠═╡ =#
+
+# ╔═╡ 3693da51-d30c-4df9-8292-348065f3e89f
+@bind j Slider(1:length(linsyssub), show_value=true)
+
+# ╔═╡ d597a663-c5d0-409e-9609-1eedad663562
+# ╠═╡ disabled = true
+#=╠═╡
+j=480
   ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -3379,6 +3520,7 @@ version = "1.4.1+1"
 # ╠═8e9b8b9c-fb40-4a5c-bddb-b801ff8078d2
 # ╠═4cf3a8d1-f7c8-405a-9f48-92039c4facfe
 # ╠═a25b1d8c-dd98-49a3-aa5d-c2027fd69bfd
+# ╠═02e24c8e-a104-4c72-ab0c-00603897f6fe
 # ╠═efa77778-c185-44ea-9e83-8f327cb391c0
 # ╠═8d4f6a9b-4796-4720-a9c0-a8d6b8995111
 # ╠═48c2b423-e2d0-42a5-b608-d6aaf7c774ea
@@ -3427,6 +3569,7 @@ version = "1.4.1+1"
 # ╠═6202a990-d990-4c60-a55c-7023f51e8cdf
 # ╠═70c72ae6-ebaf-4c5f-a046-63e9ab6dcdcd
 # ╠═dce15c41-8332-49b2-9a08-d84db00e4e1d
+# ╠═44b4779e-5502-4c2e-8cbd-d11d7b57d2a4
 # ╠═3fed3606-ece2-42b9-b83a-68190dd46b6f
 # ╠═6e53c4a6-65b7-409a-aa0a-b44cc496838c
 # ╠═2addd2b6-0649-4872-961c-583acda8a9f9
@@ -3443,6 +3586,7 @@ version = "1.4.1+1"
 # ╠═7341617a-805c-4050-b2ca-cfbc4b76441c
 # ╟─92b884c7-d39e-426e-8845-ba9c41d8e3ad
 # ╠═7bfdfd4d-0528-45a7-8e32-3786dea43490
+# ╠═eee12d9c-cdd9-4cde-9584-56dcd8b1f64e
 # ╠═9fb142ec-fc14-4d27-ae75-22937390a556
 # ╠═cdffab39-0e2e-4689-b7c4-4b526f7c07ee
 # ╠═1ded8790-b02a-4dc7-8065-b698fae387d7
@@ -3471,6 +3615,7 @@ version = "1.4.1+1"
 # ╠═3693da51-d30c-4df9-8292-348065f3e89f
 # ╠═d597a663-c5d0-409e-9609-1eedad663562
 # ╠═0df36f16-4b8c-408b-8732-2af134f30b01
+# ╠═5e7d1c5b-ad8f-4fcf-98d5-2b46afb346ce
 # ╠═2d08866d-8ee4-4143-a5b8-68488f4d201d
 # ╠═d0780341-74ea-4923-8f29-a73add8e487c
 # ╠═8d2fef46-57f1-4c3c-ae08-74b1adf76049
@@ -3483,11 +3628,9 @@ version = "1.4.1+1"
 # ╠═a06ecb0c-9b1b-41e4-874a-2e88493a38f4
 # ╟─ee4c165e-baeb-4b86-b910-390f6f27ac1c
 # ╠═892147af-cbc1-4600-8656-bb58c4fa3a37
-# ╠═c3286803-f241-45b1-91d2-f01387543290
 # ╠═d32297ed-5d28-4f49-9ad2-dedd71ae6dae
+# ╠═c3286803-f241-45b1-91d2-f01387543290
 # ╠═da813d4f-306f-43b8-bd91-e8161d7ae7b8
-# ╠═a69a9ef2-2e3f-44c2-8d57-7fac24850936
-# ╠═8b8bfbae-bc85-4fe2-806a-4e31d0b554ad
 # ╟─613d481a-8496-4c2e-8431-9b6f86ce9eb3
 # ╠═1cb5b220-6210-4bc1-800f-73504450c8c8
 # ╟─e2211218-7977-44f1-b964-ef79ccf50a90
@@ -3554,10 +3697,20 @@ version = "1.4.1+1"
 # ╠═852c47ae-0ede-4f65-afe4-f128a6541c0b
 # ╠═fd128e08-ced2-427c-8d3a-feee6061c548
 # ╠═0a1e7c69-1c46-4f4b-9b17-5f83db74b69f
+# ╠═54b84c34-fc46-4e5a-adc2-17c19f09ea27
 # ╠═9f5dcab2-1a65-49c7-a07f-8eb972c14ce5
 # ╠═5a8e8748-9550-48cf-986d-1f4ff725a483
 # ╠═14501f65-1018-4242-b97b-4ca1d5c432be
 # ╠═c8e6aab6-76c6-4dc7-81e2-8d2130c4f40b
+# ╟─e58f96bf-0f50-422b-b4af-9413f99f0be2
+# ╟─7f0bf819-4f1c-4c9f-bbfb-50917d8f7308
+# ╠═7cdf9648-2a1b-43c3-957d-794f5d544829
+# ╠═159013b4-347a-419e-beaf-1fd729549793
+# ╠═70b39e19-eb18-4a8b-bf0c-231725b8aec9
+# ╠═1eab617b-ec1e-424f-b722-7c6684c33a46
+# ╠═fc6780d8-2cac-4b9b-8300-5f9bf0d23f0b
+# ╠═e0cb562a-f5ce-4c04-b938-3de3311f977f
+# ╠═32a8737e-51de-47c4-9f3c-7bc0e8492651
 # ╟─d7273ded-86c8-4f3d-9894-3b493cfdec35
 # ╠═aa5b268a-69b2-4b33-9b44-60f35afa38a9
 # ╠═1e299993-bddd-4fc2-a783-b0cf526468b3
