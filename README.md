@@ -1,6 +1,6 @@
 # Exploration of Linear Systems on Graphs
 
-This notebook contains my experimentation with linear systems on graphs.
+The Pluto notebook contains my experimentation with linear systems on graphs.
 You can open a static snapshot of the notebook on the following page: 
 <https://mattdupraz.github.io/Graph-Linear-Systems/>
 
