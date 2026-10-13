@@ -106,8 +106,8 @@ end
 			@test equals(as_rational_function(Gsub2, l2), f)
 			# tropical operations
 			@test equals(f ⊕ f, f)
-			@test equals(f ⊗ -f, const_function(G, 0//1))
-			@test equals(f ⊗ (1//2), f ⊗ const_function(G, 1//2))
+			@test equals(f ⊙ -f, const_function(G, 0//1))
+			@test equals(f ⊙ (1//2), f ⊙ const_function(G, 1//2))
 			@test minimum(f ⊕ const_function(G, minimum(f))) == minimum(f)
 			@test is_in_span(f ⊕ (-3//2), [f, const_function(G, -1//1)])
 		end

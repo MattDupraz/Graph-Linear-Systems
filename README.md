@@ -53,8 +53,8 @@ extremals, extremal_fns = get_extremals(G, K)
 f = as_rational_function(Gsub, fns_sub[1])
 is_in_span(f, extremal_fns)
 
-# Tropical operations on rational functions: ⊕ (max) and ⊗ (+)
-g = extremal_fns[1] ⊕ extremal_fns[2] ⊗ (1//2)
+# Tropical operations on rational functions: ⊕ (max) and ⊙ (+)
+g = extremal_fns[1] ⊕ extremal_fns[2] ⊙ (1//2)
 
 # All trivalent graphs of genus 3 and 4
 genus3_graphs(), genus4_graphs()

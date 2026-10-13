@@ -167,7 +167,7 @@ function get_extremals(G::TropicalCurve, D::Divisor)::
 			if is_extremal(G, candidate)
 				push!(extremals, candidate)
 				f_rat = RationalFunction(edge_list, convert(Vector{QQ}, f))
-				push!(extremals_fns, f_rat ⊗ get_rational_function(G, slope_data))
+				push!(extremals_fns, f_rat ⊙ get_rational_function(G, slope_data))
 			end
 		end
 	end
