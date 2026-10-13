@@ -10,7 +10,11 @@ functions with tropical (max-plus) operations.
 *An extremal of the canonical linear system |K| on a trivalent genus 4 curve,
 drawn with `plotcurve`. Two of its chips lie in the interior of edges.*
 
-This repository also contains the Pluto notebook with my experiments, which
+The package consists of code I wrote to experiment while writing my master's
+thesis, which is now available on arXiv:
+[arXiv:2506.21268](https://arxiv.org/abs/2506.21268). The code originally lived
+in a single Pluto notebook and was turned into a Julia package with the help of
+an LLM. The notebook with my experiments is still in this repository and now
 uses the package.
 
 ## Installation
