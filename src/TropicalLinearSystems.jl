@@ -52,7 +52,7 @@ export set_edge_val!, vals_along_edge, get_edge_points, get_slope, get_order,
     represent_function, get_rational_function
 
 # Tropical operations
-export const_function, trop_add, trop_mult, ∔, ⨰, equals, is_in_span
+export const_function, trop_add, trop_mult, ⊕, ⊗, equals, is_in_span
 
 # Extremals
 export SlopeData, get_possible_slopes, get_rational_divisor, degout, can_fire,

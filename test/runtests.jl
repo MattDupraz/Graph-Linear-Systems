@@ -105,11 +105,11 @@ end
 			Gsub2, l2 = represent_function(G, f)
 			@test equals(as_rational_function(Gsub2, l2), f)
 			# tropical operations
-			@test equals(f ∔ f, f)
-			@test equals(f ⨰ -f, const_function(G, 0//1))
-			@test equals(f ⨰ (1//2), f ⨰ const_function(G, 1//2))
-			@test minimum(f ∔ const_function(G, minimum(f))) == minimum(f)
-			@test is_in_span(f ∔ (-3//2), [f, const_function(G, -1//1)])
+			@test equals(f ⊕ f, f)
+			@test equals(f ⊗ -f, const_function(G, 0//1))
+			@test equals(f ⊗ (1//2), f ⊗ const_function(G, 1//2))
+			@test minimum(f ⊕ const_function(G, minimum(f))) == minimum(f)
+			@test is_in_span(f ⊕ (-3//2), [f, const_function(G, -1//1)])
 		end
 		@test !is_in_span(const_function(G, 0//1), RationalFunction[])
 	end
@@ -191,6 +191,8 @@ end
 			[k == 0 ? "" : string(k) for k in canonical(Gsub)]
 		@test s[2].plotattributes[:markercolor] == :red
 		@test length(s[2].args[1]) == n_vertices(Gsub)
+		s = series(G; labelsize=8, labelcolor=:white)
+		@test s[2].plotattributes[:series_annotations] == [(string(k), 8, :white) for k in 1:n]
 		extremals, _ = get_extremals(G, canonical(G))
 		D = extremals[10]
 		s = series(G, D)

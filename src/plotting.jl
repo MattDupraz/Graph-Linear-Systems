@@ -207,7 +207,8 @@ end
 @userplot PlotCurve
 
 """
-    plotcurve(G; nodecolor=:white, nodesize=14, seed=1, ...)
+    plotcurve(G; nodecolor=:white, nodesize=14, labelsize=nothing,
+              labelcolor=nothing, seed=1, ...)
     plotcurve(G, D::AbstractVector; ...)
     plotcurve(G::TropicalCurve, D::RationalDivisor; ...)
 
@@ -217,12 +218,14 @@ drawn as small dots). A `RationalDivisor` is drawn with its chips on the
 interior of the edges.
 
 The layout only depends on the underlying unsubdivided curve (and `seed`), so a
-curve and its subdivisions are drawn consistently. Any other keyword arguments
-are passed to Plots. Requires Plots to be loaded.
+curve and its subdivisions are drawn consistently. `labelsize` and
+`labelcolor` set the font size and colour of the vertex labels. Any other
+keyword arguments are passed to Plots. Requires Plots to be loaded.
 """
 plotcurve
 
-@recipe function f(p::PlotCurve; nodecolor=:white, nodesize=14, seed=1)
+@recipe function f(p::PlotCurve; nodecolor=:white, nodesize=14, labelsize=nothing,
+		labelcolor=nothing, seed=1)
 	if !(1 <= length(p.args) <= 2) || !(p.args[1] isa AbstractCurve)
 		error("plotcurve expects a curve and optionally a divisor, got $(typeof.(p.args))")
 	end
@@ -255,7 +258,8 @@ plotcurve
 		seriestype := :scatter
 		markercolor --> nodecolor
 		markersize --> [isempty(l) ? nodesize / 4 : nodesize for l in labels]
-		series_annotations --> labels
+		fontattrs = filter(!isnothing, (labelsize, labelcolor))
+		series_annotations --> (isempty(fontattrs) ? labels : [(l, fontattrs...) for l in labels])
 		real.(pts), imag.(pts)
 	end
 end

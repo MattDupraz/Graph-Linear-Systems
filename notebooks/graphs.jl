@@ -212,7 +212,7 @@ md"""
 
 # ╔═╡ 08b2b169-e214-4bc4-9624-f6c37144d09b
 md"""
-We are going to use the unconventional notation $\dot+, \dot{\times}$ (`∔`, `⨰`), because $\oplus, \otimes$ is not very legible in the notebook
+We write tropical addition and multiplication as $\oplus, \otimes$ (`⊕`, `⊗`).
 """
 
 # ╔═╡ 4930dbef-e105-4b97-a85c-651f81c332e0
@@ -405,10 +405,10 @@ get_divisor(extr_min, extr_f)
 d1 = vals_along_edge(extr_f, Edge(6, 6, 1))
 
 # ╔═╡ 5a8e8748-9550-48cf-986d-1f4ff725a483
-d1 ∔ d2
+d1 ⊕ d2
 
 # ╔═╡ 88e42590-bcca-4dbe-be8b-525ac2461195
-f = extr_f ∔ c
+f = extr_f ⊕ c
 
 # ╔═╡ 4e87e075-acb3-4738-8ad1-c024dc190c50
 minimum(f)
@@ -423,10 +423,10 @@ D = get_divisor(extr_min, f)
 Gsub2, Dsub2 = represent_divisor(extr_min, D)
 
 # ╔═╡ 4e61a932-ac0c-4ae2-9475-8b708084b2cc
-equals(f ⨰ -f, const_function(G, 0//1))
+equals(f ⊗ -f, const_function(G, 0//1))
 
 # ╔═╡ 852c47ae-0ede-4f65-afe4-f128a6541c0b
-is_in_span(f ∔ (-9//6), [f, const_function(G, -1//1)])
+is_in_span(f ⊕ (-9//6), [f, const_function(G, -1//1)])
 
 # ╔═╡ e0cb562a-f5ce-4c04-b938-3de3311f977f
 g4_graphs_plots = map(G -> plotcurve(G), values(g4))
